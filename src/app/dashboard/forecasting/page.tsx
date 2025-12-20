@@ -17,6 +17,21 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    Select as SelectUI,
+    SelectContent as SelectContentUI,
+    SelectItem as SelectItemUI,
+    SelectTrigger as SelectTriggerUI,
+    SelectValue as SelectValueUI
+} from "@/components/ui/select";
 import { GradientText, RevealOnScroll, TiltCard } from "@/components/ui/animated";
 import {
     TrendingUp,
@@ -36,6 +51,8 @@ import {
     ThermometerSnowflake,
     Zap,
     Loader2,
+    FileText,
+    Truck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -74,22 +91,29 @@ interface AIAnalysisState {
     };
 }
 
-// Seasonal insights (static for now)
-const seasonalInsights = [
+interface Supplier {
+    id: string;
+    name: string;
+    contact_person: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+}
+
+// Seasonal patterns data (status is calculated dynamically)
+const seasonalPatternsData = [
     {
         season: "Monsoon",
         icon: CloudRain,
         color: "from-blue-500 to-cyan-500",
-        status: "Current",
         medicines: ["ORS Powder", "Paracetamol", "Cetirizine", "Cough Syrup"],
         multiplier: "1.5-2.5x",
-        months: [6, 7, 8, 9], // July-October
+        months: [6, 7, 8, 9], // July-October (0-indexed)
     },
     {
         season: "Winter",
         icon: Snowflake,
         color: "from-slate-400 to-blue-400",
-        status: "Upcoming",
         medicines: ["Vitamin D3", "Cold & Flu meds", "Cough Syrup"],
         multiplier: "1.3-1.7x",
         months: [11, 0, 1], // Dec-Feb
@@ -98,7 +122,6 @@ const seasonalInsights = [
         season: "Summer",
         icon: Sun,
         color: "from-orange-400 to-yellow-400",
-        status: "Past",
         medicines: ["ORS", "Electrolytes", "Sunscreen"],
         multiplier: "1.4-2.0x",
         months: [3, 4, 5], // April-June
@@ -107,12 +130,43 @@ const seasonalInsights = [
         season: "Flu Season",
         icon: ThermometerSnowflake,
         color: "from-purple-500 to-pink-500",
-        status: "Upcoming",
         medicines: ["Antivirals", "Vitamin C", "Paracetamol"],
         multiplier: "1.8-2.5x",
         months: [10, 11, 0], // Nov-Jan
     },
 ];
+
+// Helper to get season status based on current month
+function getSeasonStatus(seasonMonths: number[]): "Current" | "Upcoming" | "Past" {
+    const currentMonth = new Date().getMonth();
+
+    // Check if current month is in this season
+    if (seasonMonths.includes(currentMonth)) {
+        return "Current";
+    }
+
+    // Check if this season is upcoming (within next 3 months)
+    const upcomingMonths = [
+        (currentMonth + 1) % 12,
+        (currentMonth + 2) % 12,
+        (currentMonth + 3) % 12,
+    ];
+
+    for (const month of seasonMonths) {
+        if (upcomingMonths.includes(month)) {
+            return "Upcoming";
+        }
+    }
+
+    return "Past";
+}
+
+// Generate seasonal insights with dynamic status
+const seasonalInsights = seasonalPatternsData.map(pattern => ({
+    ...pattern,
+    status: getSeasonStatus(pattern.months),
+}));
+
 
 const trendConfig = {
     up: { icon: TrendingUp, color: "text-emerald-500", label: "Increasing" },
@@ -161,6 +215,14 @@ export default function ForecastingPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [aiAnalysisState, setAIAnalysisState] = useState<AIAnalysisState>({});
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+    // Purchase Order states
+    const [selectedForPO, setSelectedForPO] = useState<Set<string>>(new Set());
+    const [isPODialogOpen, setIsPODialogOpen] = useState(false);
+    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [selectedSupplier, setSelectedSupplier] = useState<string>("");
+    const [isGeneratingPO, setIsGeneratingPO] = useState(false);
 
     const supabase = createClient();
 
@@ -234,8 +296,12 @@ export default function ForecastingPage() {
                 const weeksInPeriod = periodDays / 7;
                 const forecastedDemand = Math.round(avgWeeklySales * weeksInPeriod * seasonalFactor);
 
-                // Calculate reorder quantity
-                const reorderQty = Math.max(0, forecastedDemand - currentStock);
+                // Calculate reorder quantity - consider BOTH forecasted demand AND reorder level
+                const reorderLevel = med.reorder_level || 50;
+                const demandBasedReorder = Math.max(0, forecastedDemand - currentStock);
+                const levelBasedReorder = currentStock < reorderLevel ? reorderLevel - currentStock : 0;
+                // Use the higher of the two (ensures low stock items always show up)
+                const reorderQty = Math.max(demandBasedReorder, levelBasedReorder);
 
                 // Determine trend based on recent vs older sales
                 let trend: "up" | "down" | "stable" = "stable";
@@ -272,6 +338,7 @@ export default function ForecastingPage() {
             forecasts.sort((a, b) => b.reorderQty - a.reorderQty);
 
             setForecastData(forecasts);
+            setLastUpdated(new Date());
         } catch (error) {
             console.error("Error calculating forecasts:", error);
             toast.error("Failed to calculate forecasts");
@@ -371,6 +438,185 @@ export default function ForecastingPage() {
         }
     };
 
+    // Fetch suppliers for PO
+    const fetchSuppliers = async () => {
+        const { data, error } = await supabase
+            .from("suppliers")
+            .select("id, name, contact_person, email, phone, address")
+            .eq("is_active", true)
+            .order("name");
+
+        if (data) setSuppliers(data);
+    };
+
+    // Toggle selection for PO
+    const togglePOSelection = (medicineId: string) => {
+        setSelectedForPO(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(medicineId)) {
+                newSet.delete(medicineId);
+            } else {
+                newSet.add(medicineId);
+            }
+            return newSet;
+        });
+    };
+
+    // Select all medicines needing reorder
+    const selectAllForPO = () => {
+        const reorderItems = forecastData.filter(f => f.reorderQty > 0);
+        if (selectedForPO.size === reorderItems.length) {
+            setSelectedForPO(new Set());
+        } else {
+            setSelectedForPO(new Set(reorderItems.map(f => f.id)));
+        }
+    };
+
+    // Open PO Dialog
+    const openPODialog = () => {
+        if (selectedForPO.size === 0) {
+            toast.error("Please select at least one medicine");
+            return;
+        }
+        fetchSuppliers();
+        setIsPODialogOpen(true);
+    };
+
+    // Generate Purchase Order PDF
+    const generatePurchaseOrder = () => {
+        if (!selectedSupplier) {
+            toast.error("Please select a supplier");
+            return;
+        }
+
+        setIsGeneratingPO(true);
+        const supplier = suppliers.find(s => s.id === selectedSupplier);
+        const selectedItems = forecastData.filter(f => selectedForPO.has(f.id));
+
+        const poNumber = `PO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+        const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        // Calculate totals (estimate unit price as ₹25)
+        const items = selectedItems.map(item => ({
+            name: item.medicine,
+            qty: item.reorderQty,
+            unitPrice: 25,
+            total: item.reorderQty * 25
+        }));
+        const grandTotal = items.reduce((sum, item) => sum + item.total, 0);
+
+        // Generate HTML for PDF
+        const itemsHtml = items.map(item => `
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e5e5;">${item.name}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.qty}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">₹${item.unitPrice.toFixed(2)}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">₹${item.total.toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const poHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Purchase Order - ${poNumber}</title>
+                <style>
+                    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 40px; background: #fff; }
+                    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 3px solid #10b981; }
+                    .logo { font-size: 28px; font-weight: bold; color: #10b981; }
+                    .logo span { color: #3b82f6; }
+                    .po-info { text-align: right; }
+                    .po-number { font-size: 24px; font-weight: bold; color: #333; }
+                    .po-date { color: #666; margin-top: 5px; }
+                    .parties { display: flex; justify-content: space-between; margin-bottom: 40px; }
+                    .party { width: 45%; }
+                    .party-title { font-weight: bold; color: #10b981; margin-bottom: 10px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+                    .party-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+                    .party-details { color: #666; font-size: 14px; line-height: 1.6; }
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+                    th { background: linear-gradient(135deg, #10b981, #3b82f6); color: white; padding: 12px 10px; text-align: left; font-weight: 600; }
+                    th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: center; }
+                    th:last-child { text-align: right; }
+                    .total-row { background: #f8f9fa; font-weight: bold; }
+                    .total-row td { padding: 15px 10px; border-top: 2px solid #10b981; }
+                    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e5e5; color: #666; font-size: 12px; text-align: center; }
+                    @media print { body { margin: 0; padding: 20px; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <div class="logo">Pharma<span>Flow</span></div>
+                    <div class="po-info">
+                        <div class="po-number">${poNumber}</div>
+                        <div class="po-date">Date: ${today}</div>
+                    </div>
+                </div>
+                
+                <div class="parties">
+                    <div class="party">
+                        <div class="party-title">From</div>
+                        <div class="party-name">Your Pharmacy</div>
+                        <div class="party-details">
+                            Smart Pharmacy Inventory<br>
+                            PharmaFlow Cloud System
+                        </div>
+                    </div>
+                    <div class="party">
+                        <div class="party-title">To (Supplier)</div>
+                        <div class="party-name">${supplier?.name || 'N/A'}</div>
+                        <div class="party-details">
+                            ${supplier?.contact_person ? `Contact: ${supplier.contact_person}<br>` : ''}
+                            ${supplier?.email ? `Email: ${supplier.email}<br>` : ''}
+                            ${supplier?.phone ? `Phone: ${supplier.phone}<br>` : ''}
+                            ${supplier?.address || ''}
+                        </div>
+                    </div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Medicine Name</th>
+                            <th>Quantity</th>
+                            <th>Unit Price</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                        <tr class="total-row">
+                            <td colspan="3" style="text-align: right; padding-right: 20px;">Grand Total:</td>
+                            <td style="text-align: right; font-size: 18px; color: #10b981;">₹${grandTotal.toFixed(2)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="footer">
+                    <p>This is a computer-generated purchase order from PharmaFlow Smart Pharmacy Inventory System.</p>
+                    <p>Generated on ${new Date().toLocaleString('en-IN')}</p>
+                </div>
+
+                <script>window.onload = function() { window.print(); }</script>
+            </body>
+            </html>
+        `;
+
+        // Open in new window for printing/PDF
+        const poWindow = window.open('', '_blank', 'width=800,height=900');
+        if (poWindow) {
+            poWindow.document.write(poHtml);
+            poWindow.document.close();
+            toast.success(`Purchase Order ${poNumber} generated!`);
+        } else {
+            toast.error("Please allow popups to generate PO");
+        }
+
+        setIsGeneratingPO(false);
+        setIsPODialogOpen(false);
+        setSelectedForPO(new Set());
+        setSelectedSupplier("");
+    };
+
     // Stats
     const totalReorderValue = forecastData.reduce((sum, f) => sum + f.reorderQty * 25, 0);
     const medicinesNeedingReorder = forecastData.filter((f) => f.reorderQty > 0).length;
@@ -425,6 +671,15 @@ export default function ForecastingPage() {
                         <Download className="w-4 h-4" />
                         Export Report
                     </Button>
+                    {selectedForPO.size > 0 && (
+                        <Button
+                            className="gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90"
+                            onClick={openPODialog}
+                        >
+                            <FileText className="w-4 h-4" />
+                            Create PO ({selectedForPO.size})
+                        </Button>
+                    )}
                 </motion.div>
             </div>
 
@@ -520,15 +775,46 @@ export default function ForecastingPage() {
                                             </CardContent>
                                         </Card>
                                     ) : (
-                                        forecastData.filter((f) => f.reorderQty > 0).map((forecast, index) => (
-                                            <ForecastCard
-                                                key={forecast.id}
-                                                forecast={forecast}
-                                                index={index}
-                                                aiState={aiAnalysisState[forecast.medicineId]}
-                                                onGetAIAnalysis={() => getAIAnalysis(forecast)}
-                                            />
-                                        ))
+                                        <>
+                                            {/* Select All for PO */}
+                                            <div className="flex items-center justify-between p-3 rounded-lg bg-accent/30 border border-border/50">
+                                                <div className="flex items-center gap-3">
+                                                    <Checkbox
+                                                        id="select-all-po"
+                                                        checked={selectedForPO.size === forecastData.filter(f => f.reorderQty > 0).length && selectedForPO.size > 0}
+                                                        onCheckedChange={selectAllForPO}
+                                                    />
+                                                    <label htmlFor="select-all-po" className="text-sm font-medium cursor-pointer">
+                                                        Select all for Purchase Order
+                                                    </label>
+                                                </div>
+                                                {selectedForPO.size > 0 && (
+                                                    <Badge variant="secondary" className="gap-1">
+                                                        <Truck className="w-3 h-3" />
+                                                        {selectedForPO.size} selected
+                                                    </Badge>
+                                                )}
+                                            </div>
+
+                                            {forecastData.filter((f) => f.reorderQty > 0).map((forecast, index) => (
+                                                <div key={forecast.id} className="flex items-start gap-3">
+                                                    <div className="pt-5">
+                                                        <Checkbox
+                                                            checked={selectedForPO.has(forecast.id)}
+                                                            onCheckedChange={() => togglePOSelection(forecast.id)}
+                                                        />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <ForecastCard
+                                                            forecast={forecast}
+                                                            index={index}
+                                                            aiState={aiAnalysisState[forecast.medicineId]}
+                                                            onGetAIAnalysis={() => getAIAnalysis(forecast)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </>
                                     )}
                                 </TabsContent>
 
@@ -633,15 +919,15 @@ export default function ForecastingPage() {
                                 <div className="space-y-2">
                                     <div className="flex justify-between text-sm">
                                         <span className="text-muted-foreground">Historical Data</span>
-                                        <span>6 months</span>
+                                        <span>90 days (3 months)</span>
                                     </div>
                                     <div className="flex justify-between text-sm">
                                         <span className="text-muted-foreground">Seasonal Factors</span>
-                                        <span>4 seasons</span>
+                                        <span>{seasonalInsights.filter(s => s.status === "Current").length > 0 ? seasonalInsights.filter(s => s.status === "Current").map(s => s.season).join(", ") : "None active"}</span>
                                     </div>
                                     <div className="flex justify-between text-sm">
                                         <span className="text-muted-foreground">Last Updated</span>
-                                        <span>Today, 6:00 AM</span>
+                                        <span>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--"}</span>
                                     </div>
                                 </div>
                             </CardContent>
@@ -649,6 +935,91 @@ export default function ForecastingPage() {
                     </RevealOnScroll>
                 </div>
             </div>
+
+            {/* Purchase Order Dialog */}
+            <Dialog open={isPODialogOpen} onOpenChange={setIsPODialogOpen}>
+                <DialogContent className="max-w-lg glass-card">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-primary" />
+                            Create Purchase Order
+                        </DialogTitle>
+                        <DialogDescription>
+                            Generate a purchase order for {selectedForPO.size} selected medicine{selectedForPO.size !== 1 ? 's' : ''}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-4">
+                        {/* Selected Items Summary */}
+                        <div className="p-3 rounded-lg bg-accent/30 border border-border/50">
+                            <p className="text-sm font-medium mb-2">Selected Items:</p>
+                            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                                {forecastData.filter(f => selectedForPO.has(f.id)).map(item => (
+                                    <Badge key={item.id} variant="outline" className="text-xs">
+                                        {item.medicine} ({item.reorderQty} units)
+                                    </Badge>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Supplier Selection */}
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Select Supplier</label>
+                            <SelectUI value={selectedSupplier} onValueChange={setSelectedSupplier}>
+                                <SelectTriggerUI className="bg-background/50">
+                                    <Truck className="w-4 h-4 mr-2 text-muted-foreground" />
+                                    <SelectValueUI placeholder="Choose a supplier..." />
+                                </SelectTriggerUI>
+                                <SelectContentUI>
+                                    {suppliers.length === 0 ? (
+                                        <SelectItemUI value="_none" disabled>No suppliers available</SelectItemUI>
+                                    ) : (
+                                        suppliers.map(supplier => (
+                                            <SelectItemUI key={supplier.id} value={supplier.id}>
+                                                {supplier.name}
+                                            </SelectItemUI>
+                                        ))
+                                    )}
+                                </SelectContentUI>
+                            </SelectUI>
+                        </div>
+
+                        {/* Estimated Total */}
+                        <div className="p-3 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+                            <div className="flex justify-between items-center">
+                                <span className="text-sm text-muted-foreground">Estimated Total:</span>
+                                <span className="text-xl font-bold text-emerald-500">
+                                    ₹{(forecastData.filter(f => selectedForPO.has(f.id)).reduce((sum, f) => sum + f.reorderQty * 25, 0)).toLocaleString()}
+                                </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">*Based on average cost of ₹25/unit</p>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                        <Button variant="outline" className="flex-1" onClick={() => setIsPODialogOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90"
+                            onClick={generatePurchaseOrder}
+                            disabled={!selectedSupplier || isGeneratingPO}
+                        >
+                            {isGeneratingPO ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <FileText className="w-4 h-4 mr-2" />
+                                    Generate PO
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -828,15 +1199,10 @@ function ForecastCard({
                                     )}
 
                                     {needsReorder && (
-                                        <>
-                                            <Button size="sm" className="bg-gradient-to-r from-primary to-pharma-emerald">
-                                                <Package className="w-3 h-3 mr-1" />
-                                                Create Order
-                                            </Button>
-                                            <Button size="sm" variant="outline">
-                                                View Details
-                                            </Button>
-                                        </>
+                                        <Badge variant="secondary" className="text-xs bg-amber-500/10 text-amber-500 border-amber-500/20">
+                                            <Package className="w-3 h-3 mr-1" />
+                                            Needs Reorder
+                                        </Badge>
                                     )}
                                 </div>
 

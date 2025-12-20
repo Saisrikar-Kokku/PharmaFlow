@@ -1,6 +1,7 @@
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
+import { ShaderIntro } from "@/components/ui/shader-intro";
 
-// Force dynamic rendering for all dashboard pages - required for server-side data fetching
+// Force dynamic rendering for all dashboard pages
 export const dynamic = 'force-dynamic';
 
 export default function DashboardLayout({
@@ -8,5 +9,10 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    return <DashboardSidebar>{children}</DashboardSidebar>;
+    return (
+        <>
+            <ShaderIntro />
+            <DashboardSidebar>{children}</DashboardSidebar>
+        </>
+    );
 }

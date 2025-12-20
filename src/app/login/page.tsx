@@ -61,21 +61,6 @@ export default function LoginPage() {
         }
     };
 
-    // Demo login for testing
-    const handleDemoLogin = async () => {
-        setIsLoading(true);
-        try {
-            // For demo purposes, we'll create a session or redirect to dashboard
-            // In production, you'd have actual demo credentials
-            toast.info("Demo mode - redirecting to dashboard");
-            router.push("/dashboard");
-        } catch {
-            toast.error("Demo login failed");
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
     return (
         <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
             {/* Background effects */}
@@ -186,24 +171,6 @@ export default function LoginPage() {
                                 </Button>
                             </MagneticButton>
                         </form>
-
-                        <div className="relative my-6">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-border" />
-                            </div>
-                            <div className="relative flex justify-center text-xs uppercase">
-                                <span className="bg-card px-2 text-muted-foreground">Or</span>
-                            </div>
-                        </div>
-
-                        <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={handleDemoLogin}
-                            disabled={isLoading}
-                        >
-                            Try Demo Account
-                        </Button>
 
                         <p className="text-center text-sm text-muted-foreground mt-6">
                             Don&apos;t have an account?{" "}

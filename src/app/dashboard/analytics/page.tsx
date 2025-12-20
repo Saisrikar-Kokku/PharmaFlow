@@ -42,15 +42,16 @@ import { toast } from "sonner";
 export default function AnalyticsPage() {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [selectedPeriod, setSelectedPeriod] = useState("30");
 
     useEffect(() => {
         loadAnalytics();
-    }, []);
+    }, [selectedPeriod]);
 
     async function loadAnalytics() {
         try {
             setLoading(true);
-            const analyticsData = await fetchAnalyticsData();
+            const analyticsData = await fetchAnalyticsData(parseInt(selectedPeriod));
             setData(analyticsData);
         } catch (error) {
             console.error("Error loading analytics:", error);
@@ -58,6 +59,48 @@ export default function AnalyticsPage() {
         } finally {
             setLoading(false);
         }
+    }
+
+    function handleExport() {
+        if (!data) return;
+
+        const csvRows = [
+            ["PharmaFlow Analytics Report", `Generated: ${new Date().toLocaleString()}`],
+            [],
+            ["=== REVENUE ==="],
+            ["Today's Revenue", `₹${data.revenue.today.toLocaleString()}`],
+            ["This Week", `₹${data.revenue.thisWeek.toLocaleString()}`],
+            ["This Month", `₹${data.revenue.thisMonth.toLocaleString()}`],
+            ["Last Month", `₹${data.revenue.lastMonth.toLocaleString()}`],
+            [],
+            ["=== SALES ==="],
+            ["Today's Transactions", data.sales.todayTransactions],
+            ["Monthly Transactions", data.sales.thisMonthTransactions],
+            ["Avg Transaction Value", `₹${data.sales.avgTransactionValue.toFixed(2)}`],
+            [],
+            ["=== INVENTORY ==="],
+            ["Total Medicines", data.inventory.totalMedicines],
+            ["Total Value", `₹${data.inventory.totalValue.toLocaleString()}`],
+            ["Inventory Turnover", `${data.inventory.turnoverRate}x`],
+            ["Out of Stock", data.inventory.outOfStock],
+            ["Low Stock", data.inventory.lowStock],
+            [],
+            ["=== EXPIRY ALERTS ==="],
+            ["Expiring in 30 days", `${data.expiry.expiring30Days.count} items (₹${data.expiry.expiring30Days.value.toLocaleString()})`],
+            ["Expiring in 60 days", `${data.expiry.expiring60Days.count} items (₹${data.expiry.expiring60Days.value.toLocaleString()})`],
+            [],
+            ["=== TOP SELLERS ==="],
+            ["Medicine", "Units Sold", "Revenue"],
+            ...data.topSellers.map((med: any) => [med.name, med.units, `₹${med.revenue.toLocaleString()}`]),
+        ];
+
+        const csvContent = csvRows.map(row => row.join(",")).join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `PharmaFlow_Analytics_${new Date().toISOString().split("T")[0]}.csv`;
+        link.click();
+        toast.success("Analytics exported successfully!");
     }
 
     if (loading) {
@@ -113,7 +156,7 @@ export default function AnalyticsPage() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
                 >
-                    <Select defaultValue="30">
+                    <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
                         <SelectTrigger className="w-[150px] bg-background/50">
                             <Calendar className="w-4 h-4 mr-2" />
                             <SelectValue />
@@ -125,7 +168,7 @@ export default function AnalyticsPage() {
                             <SelectItem value="365">Last year</SelectItem>
                         </SelectContent>
                     </Select>
-                    <Button className="gap-2 bg-gradient-to-r from-primary to-pharma-emerald hover:opacity-90">
+                    <Button onClick={handleExport} className="gap-2 bg-gradient-to-r from-primary to-pharma-emerald hover:opacity-90">
                         <Download className="w-4 h-4" />
                         Export
                     </Button>
@@ -420,16 +463,22 @@ export default function AnalyticsPage() {
                             <CardContent>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
                                     <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
-                                        <p className="text-4xl font-bold text-emerald-500">35%</p>
-                                        <p className="text-sm mt-2">Reduction in Expiry Waste</p>
+                                        <p className="text-4xl font-bold text-emerald-500">
+                                            {data.inventory.totalMedicines > 0
+                                                ? Math.round((1 - (data.expiry.expiring30Days.count / Math.max(data.inventory.totalMedicines, 1))) * 100)
+                                                : 100}%
+                                        </p>
+                                        <p className="text-sm mt-2">Stock Freshness Rate</p>
                                     </div>
                                     <div className="p-4 rounded-xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20">
-                                        <p className="text-4xl font-bold text-blue-500">₹28K</p>
-                                        <p className="text-sm mt-2">Monthly Savings</p>
+                                        <p className="text-4xl font-bold text-blue-500">
+                                            ₹{((data.expiry.expiring30Days.value + data.expiry.expiring60Days.value) / 1000).toFixed(0)}K
+                                        </p>
+                                        <p className="text-sm mt-2">At-Risk Value (60 days)</p>
                                     </div>
                                     <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-violet-500/10 border border-purple-500/20">
-                                        <p className="text-4xl font-bold text-purple-500">98%</p>
-                                        <p className="text-sm mt-2">FEFO Compliance Rate</p>
+                                        <p className="text-4xl font-bold text-purple-500">{data.inventory.fulfillmentRate}%</p>
+                                        <p className="text-sm mt-2">Order Fulfillment Rate</p>
                                     </div>
                                 </div>
                             </CardContent>

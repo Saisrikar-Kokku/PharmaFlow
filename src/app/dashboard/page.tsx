@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TiltCard, GradientText, RevealOnScroll } from "@/components/ui/animated";
+import { AnimatedCounter } from "@/components/ui/animated-counter";
+import { SpotlightCard, DepthCard } from "@/components/ui/modern-animations";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     getDashboardStats,
@@ -363,7 +365,7 @@ export default function DashboardPage() {
                             <CardDescription>Today&apos;s performance</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/10 to-pharma-emerald/10 border border-primary/20">
+                            <SpotlightCard className="p-4 rounded-xl bg-gradient-to-br from-primary/10 to-pharma-emerald/10 border border-primary/20">
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-sm text-muted-foreground">Revenue</span>
                                     <TrendingUp className="w-4 h-4 text-emerald-500" />
@@ -372,11 +374,13 @@ export default function DashboardPage() {
                                     <Skeleton className="h-8 w-24" />
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-bold">₹{(quickStats?.todaySales || 0).toLocaleString()}</p>
+                                        <p className="text-2xl font-bold">
+                                            ₹<AnimatedCounter value={quickStats?.todaySales || 0} duration={1.5} />
+                                        </p>
                                         <p className="text-xs text-emerald-500">Today&apos;s total</p>
                                     </>
                                 )}
-                            </div>
+                            </SpotlightCard>
 
                             <div className="p-4 rounded-xl bg-accent/50">
                                 <div className="flex items-center justify-between mb-2">
@@ -387,7 +391,9 @@ export default function DashboardPage() {
                                     <Skeleton className="h-8 w-16" />
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-bold">{quickStats?.transactionCount || 0}</p>
+                                        <p className="text-2xl font-bold">
+                                            <AnimatedCounter value={quickStats?.transactionCount || 0} duration={1.2} />
+                                        </p>
                                         <p className="text-xs text-muted-foreground">Orders processed today</p>
                                     </>
                                 )}
@@ -486,19 +492,27 @@ export default function DashboardPage() {
                         <CardContent className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                                    <p className="text-3xl font-bold text-emerald-500">{stats?.totalMedicines || 0}</p>
+                                    <p className="text-3xl font-bold text-emerald-500">
+                                        <AnimatedCounter value={stats?.totalMedicines || 0} duration={1.5} />
+                                    </p>
                                     <p className="text-xs text-muted-foreground mt-1">Total Medicines</p>
                                 </div>
-                                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
-                                    <p className="text-3xl font-bold text-amber-500">{stats?.lowStockCount || 0}</p>
+                                <div className={`p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center ${(stats?.lowStockCount || 0) > 0 ? 'animate-pulse-glow-warning' : ''}`}>
+                                    <p className="text-3xl font-bold text-amber-500">
+                                        <AnimatedCounter value={stats?.lowStockCount || 0} duration={1.3} />
+                                    </p>
                                     <p className="text-xs text-muted-foreground mt-1">Low Stock</p>
                                 </div>
-                                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                                    <p className="text-3xl font-bold text-red-500">{stats?.expiringCount || 0}</p>
+                                <div className={`p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center ${(stats?.expiringCount || 0) > 0 ? 'animate-pulse-glow-danger' : ''}`}>
+                                    <p className="text-3xl font-bold text-red-500">
+                                        <AnimatedCounter value={stats?.expiringCount || 0} duration={1.1} />
+                                    </p>
                                     <p className="text-xs text-muted-foreground mt-1">Expiring Soon</p>
                                 </div>
                                 <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-center">
-                                    <p className="text-3xl font-bold text-blue-500">{stats?.unresolvedAlerts || 0}</p>
+                                    <p className="text-3xl font-bold text-blue-500">
+                                        <AnimatedCounter value={stats?.unresolvedAlerts || 0} duration={1.0} />
+                                    </p>
                                     <p className="text-xs text-muted-foreground mt-1">Active Alerts</p>
                                 </div>
                             </div>

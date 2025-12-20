@@ -58,6 +58,10 @@ export function useUser() {
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
+        // Clear intro flag so it shows again on next login
+        if (typeof window !== 'undefined') {
+            sessionStorage.removeItem("hasShownDashboardIntro");
+        }
         // Redirect to login page
         window.location.href = '/login';
     }, []);

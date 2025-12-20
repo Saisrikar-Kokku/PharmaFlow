@@ -55,23 +55,23 @@ interface TopSeller {
     growth: number;
 }
 
-export async function fetchAnalyticsData(): Promise<AnalyticsData> {
+export async function fetchAnalyticsData(days: number = 30): Promise<AnalyticsData> {
     const supabase = createClient();
 
     // Parallel fetch all data
     const [revenue, sales, inventory, expiry, topSellers, categoryBreakdown] = await Promise.all([
-        fetchRevenueData(supabase),
-        fetchSalesData(supabase),
-        fetchInventoryData(supabase),
+        fetchRevenueData(supabase, days),
+        fetchSalesData(supabase, days),
+        fetchInventoryData(supabase, days),
         fetchExpiryData(supabase),
-        fetchTopSellers(supabase),
-        fetchCategoryBreakdown(supabase),
+        fetchTopSellers(supabase, days),
+        fetchCategoryBreakdown(supabase, days),
     ]);
 
     return { revenue, sales, inventory, expiry, topSellers, categoryBreakdown };
 }
 
-async function fetchRevenueData(supabase: any): Promise<RevenueData> {
+async function fetchRevenueData(supabase: any, days: number): Promise<RevenueData> {
     // Get today's start
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -98,11 +98,15 @@ async function fetchRevenueData(supabase: any): Promise<RevenueData> {
     const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
 
-    // Fetch all revenue data
+    // Calculate the start date based on days parameter
+    const rangeStart = new Date(today);
+    rangeStart.setDate(rangeStart.getDate() - days);
+
+    // Fetch all revenue data within the selected range
     const { data: allSales } = await supabase
         .from("sales")
         .select("total, created_at")
-        .gte("created_at", lastMonthStart.toISOString());
+        .gte("created_at", rangeStart.toISOString());
 
     if (!allSales) {
         return {
@@ -150,13 +154,10 @@ async function fetchRevenueData(supabase: any): Promise<RevenueData> {
         })
         .reduce((sum: number, s: any) => sum + (s.total || 0), 0);
 
-    // Calculate daily trend for last 30 days
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
+    // Calculate daily trend for selected period
     const dailyMap: { [key: string]: number } = {};
     allSales
-        .filter((s: any) => new Date(s.created_at) >= thirtyDaysAgo)
+        .filter((s: any) => new Date(s.created_at) >= rangeStart)
         .forEach((s: any) => {
             const dateStr = new Date(s.created_at).toISOString().split("T")[0];
             dailyMap[dateStr] = (dailyMap[dateStr] || 0) + (s.total || 0);
@@ -177,7 +178,7 @@ async function fetchRevenueData(supabase: any): Promise<RevenueData> {
     };
 }
 
-async function fetchSalesData(supabase: any): Promise<SalesData> {
+async function fetchSalesData(supabase: any, days: number): Promise<SalesData> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -204,7 +205,7 @@ async function fetchSalesData(supabase: any): Promise<SalesData> {
     };
 }
 
-async function fetchInventoryData(supabase: any): Promise<InventoryData> {
+async function fetchInventoryData(supabase: any, days: number): Promise<InventoryData> {
     const { data: medicines } = await supabase
         .from("medicines")
         .select(`
@@ -249,9 +250,9 @@ async function fetchInventoryData(supabase: any): Promise<InventoryData> {
 
 
     // Real Turnover Rate Calculation (COGS / Average Inventory)
-    // We need COGS for the last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // We need COGS for the selected period
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - days);
 
     const { data: soldItems } = await supabase
         .from("sale_items")
@@ -260,7 +261,7 @@ async function fetchInventoryData(supabase: any): Promise<InventoryData> {
             batches (cost_price),
             sales!inner (created_at)
         `)
-        .gte("sales.created_at", thirtyDaysAgo.toISOString());
+        .gte("sales.created_at", rangeStart.toISOString());
 
     let cogs = 0;
     if (soldItems) {
@@ -350,9 +351,9 @@ async function fetchExpiryData(supabase: any): Promise<ExpiryData> {
     };
 }
 
-async function fetchTopSellers(supabase: any): Promise<TopSeller[]> {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+async function fetchTopSellers(supabase: any, days: number): Promise<TopSeller[]> {
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - days);
 
     const { data: saleItems } = await supabase
         .from("sale_items")
@@ -362,7 +363,7 @@ async function fetchTopSellers(supabase: any): Promise<TopSeller[]> {
             batch_id,
             sales!inner (created_at)
         `)
-        .gte("sales.created_at", thirtyDaysAgo.toISOString());
+        .gte("sales.created_at", rangeStart.toISOString());
 
     if (!saleItems) return [];
 
@@ -404,9 +405,9 @@ async function fetchTopSellers(supabase: any): Promise<TopSeller[]> {
     return topSellers;
 }
 
-async function fetchCategoryBreakdown(supabase: any): Promise<CategoryBreakdown[]> {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+async function fetchCategoryBreakdown(supabase: any, days: number): Promise<CategoryBreakdown[]> {
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - days);
 
     // Fetch all sale items with category info
     const { data: saleItems } = await supabase
@@ -417,7 +418,7 @@ async function fetchCategoryBreakdown(supabase: any): Promise<CategoryBreakdown[
             batch_id,
             sales!inner (created_at)
         `)
-        .gte("sales.created_at", thirtyDaysAgo.toISOString());
+        .gte("sales.created_at", rangeStart.toISOString());
 
     if (!saleItems || saleItems.length === 0) return [];
 

@@ -51,11 +51,15 @@ import {
     AlertCircle,
 } from "lucide-react";
 import { useSupabase } from "@/hooks/use-supabase";
+import { toWords } from 'number-to-words'; // Keep for printing receipts
+import { useDebounce } from "@/hooks/use-debounce";
 import { toast } from "sonner";
+import { useConfetti } from "@/components/ui/confetti";
 
 interface Medicine {
     id: string;
     name: string;
+    generic_name?: string;
     batches: Batch[];
 }
 
@@ -98,7 +102,9 @@ interface Sale {
 
 export default function SalesPage() {
     const supabase = useSupabase();
+    const confetti = useConfetti();
     const [searchQuery, setSearchQuery] = useState("");
+    const debouncedSearchQuery = useDebounce(searchQuery, 300);
     const [cart, setCart] = useState<CartItem[]>([]);
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
@@ -129,12 +135,93 @@ export default function SalesPage() {
 
     // Real-time data from Supabase
     const [medicines, setMedicines] = useState<Medicine[]>([]);
+    const [allMedicinesForAlternatives, setAllMedicinesForAlternatives] = useState<Medicine[]>([]);
     const [recentSales, setRecentSales] = useState<Sale[]>([]);
+    const [allSales, setAllSales] = useState<Sale[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+    const [historySearchQuery, setHistorySearchQuery] = useState("");
+    const [historySearchDate, setHistorySearchDate] = useState("");
 
     // Print receipt function
     const handlePrint = () => {
         window.print();
+    };
+
+    // Reprint receipt for a specific sale
+    const handleReprintReceipt = (sale: Sale) => {
+        const receiptWindow = window.open('', '_blank', 'width=400,height=600');
+        if (!receiptWindow) {
+            toast.error("Please allow popups to print receipt");
+            return;
+        }
+
+        const itemsHtml = sale.sale_items.map(item => `
+            <tr>
+                <td style="padding: 4px 0; border-bottom: 1px dashed #ddd;">${item.medicines?.name || 'Unknown'}</td>
+                <td style="padding: 4px 0; border-bottom: 1px dashed #ddd; text-align: center;">${item.quantity}</td>
+                <td style="padding: 4px 0; border-bottom: 1px dashed #ddd; text-align: right;">₹${(item.unit_price * item.quantity).toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const receiptHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Receipt - ${sale.id.slice(0, 8)}</title>
+                <style>
+                    body { font-family: 'Courier New', monospace; max-width: 300px; margin: 20px auto; padding: 20px; }
+                    .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 10px; }
+                    .header h1 { margin: 0; font-size: 20px; }
+                    .header p { margin: 5px 0; font-size: 12px; color: #666; }
+                    .details { font-size: 12px; margin-bottom: 10px; }
+                    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                    th { text-align: left; padding: 4px 0; border-bottom: 2px solid #000; }
+                    .total { border-top: 2px solid #000; margin-top: 10px; padding-top: 10px; font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; }
+                    .footer { text-align: center; margin-top: 20px; font-size: 11px; color: #666; }
+                    @media print { body { margin: 0; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>PharmaFlow</h1>
+                    <p>Smart Pharmacy Inventory</p>
+                    <p style="font-size: 10px;">Receipt #${sale.id.slice(0, 8).toUpperCase()}</p>
+                </div>
+                <div class="details">
+                    <p><strong>Date:</strong> ${new Date(sale.created_at).toLocaleString('en-IN')}</p>
+                    <p><strong>Customer:</strong> ${sale.customer_name || 'Walk-in'}</p>
+                    ${sale.customer_phone ? `<p><strong>Phone:</strong> ${sale.customer_phone}</p>` : ''}
+                    <p><strong>Payment:</strong> ${sale.payment_method.toUpperCase()}</p>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th style="text-align: center;">Qty</th>
+                            <th style="text-align: right;">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                    </tbody>
+                </table>
+                <div class="total">
+                    <span>TOTAL:</span>
+                    <span>₹${sale.total.toFixed(2)}</span>
+                </div>
+                <div class="footer">
+                    <p>Thank you for your purchase!</p>
+                    <p>Get well soon 💊</p>
+                </div>
+                <script>window.onload = function() { window.print(); }</script>
+            </body>
+            </html>
+        `;
+
+        receiptWindow.document.write(receiptHtml);
+        receiptWindow.document.close();
+        toast.success("Receipt opened for printing");
     };
 
     // Fetch medicines with batches (FEFO sorted)
@@ -145,6 +232,7 @@ export default function SalesPage() {
                 .select(`
                     id,
                     name,
+                    generic_name,
                     batches (
                         id,
                         batch_number,
@@ -158,19 +246,31 @@ export default function SalesPage() {
 
             if (error) throw error;
 
-            // Filter and sort batches by FEFO (First Expiry First Out)
-            const processedMedicines = (data || []).map((med: any) => ({
+            // Process all medicines (for alternative suggestions)
+            const allMedsProcessed = (data || []).map((med: any) => ({
                 ...med,
                 batches: (med.batches || [])
                     .filter((b: Batch) => {
-                        // Filter out expired batches and zero stock
                         const isExpired = new Date(b.expiry_date) < new Date();
                         return !isExpired && b.quantity > 0;
                     })
                     .sort((a: Batch, b: Batch) =>
                         new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime()
                     )
-            })).filter((med: Medicine) => med.batches.length > 0); // Only show medicines with available stock
+            }));
+
+            // Store all medicines for alternative lookup
+            setAllMedicinesForAlternatives(allMedsProcessed);
+
+            // Filter to only medicines with available stock for the main list
+            // Then SORT by earliest expiring batch (FEFO display order)
+            const processedMedicines = allMedsProcessed
+                .filter((med: Medicine) => med.batches.length > 0)
+                .sort((a: Medicine, b: Medicine) => {
+                    const aExpiry = a.batches[0]?.expiry_date ? new Date(a.batches[0].expiry_date).getTime() : Infinity;
+                    const bExpiry = b.batches[0]?.expiry_date ? new Date(b.batches[0].expiry_date).getTime() : Infinity;
+                    return aExpiry - bExpiry; // Earliest expiry first
+                });
 
             setMedicines(processedMedicines);
         } catch (error) {
@@ -208,6 +308,39 @@ export default function SalesPage() {
             setRecentSales((data as unknown as Sale[]) || []);
         } catch (error) {
             console.error("Error fetching sales:", error);
+        }
+    };
+
+    // Fetch all sales for search (called when history dialog opens)
+    const fetchAllSales = async () => {
+        setIsHistoryLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from("sales")
+                .select(`
+                    id,
+                    customer_name,
+                    customer_phone,
+                    total,
+                    created_at,
+                    status,
+                    payment_method,
+                    sale_items (
+                        quantity,
+                        batch_id,
+                        unit_price,
+                        medicines (name)
+                    )
+                `)
+                .order("created_at", { ascending: false })
+                .limit(100);
+
+            if (error) throw error;
+            setAllSales((data as unknown as Sale[]) || []);
+        } catch (error) {
+            console.error("Error fetching all sales:", error);
+        } finally {
+            setIsHistoryLoading(false);
         }
     };
 
@@ -275,12 +408,40 @@ export default function SalesPage() {
         }
     }, [isEditDialogOpen]);
 
-    // Filter medicines based on search
+    // Filter medicines based on search (by name, generic name, or batch number)
     const filteredMedicines = medicines.filter(
-        (med) =>
-            med.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            med.batches.some(b => b.batch_number.toLowerCase().includes(searchQuery.toLowerCase()))
+        (med) => {
+            const query = debouncedSearchQuery.toLowerCase();
+            return (
+                med.name.toLowerCase().includes(query) ||
+                (med.generic_name && med.generic_name.toLowerCase().includes(query)) ||
+                med.batches.some(b => b.batch_number.toLowerCase().includes(query))
+            );
+        }
     );
+
+    // Find alternative drugs when searched medicine is out of stock
+    const findAlternatives = (medicineName: string): Medicine[] => {
+        // Find the medicine in all medicines (including out of stock)
+        const searchedMed = allMedicinesForAlternatives.find(
+            m => m.name.toLowerCase().includes(medicineName.toLowerCase())
+        );
+
+        if (!searchedMed || !searchedMed.generic_name) return [];
+
+        // Find other medicines with same generic name that have stock
+        return allMedicinesForAlternatives.filter(m =>
+            m.id !== searchedMed.id &&
+            m.generic_name &&
+            m.generic_name.toLowerCase() === searchedMed.generic_name?.toLowerCase() &&
+            m.batches.length > 0
+        );
+    };
+
+    // Check if there are alternatives for the search query
+    const alternativeSuggestions = debouncedSearchQuery.length >= 2 && filteredMedicines.length === 0
+        ? findAlternatives(debouncedSearchQuery)
+        : [];
 
     // Cart calculations
     const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -613,6 +774,9 @@ export default function SalesPage() {
             setIsSuccessOpen(true);
             toast.success("Sale completed successfully!");
 
+            // 🎉 Celebrate with confetti!
+            confetti.fire();
+
             // Send Email Receipt
             if (customerEmail) {
                 fetch("/api/send-receipt", {
@@ -751,14 +915,65 @@ export default function SalesPage() {
                             </CardHeader>
                             <CardContent>
                                 {isLoading ? (
-                                    <div className="text-center py-8 text-muted-foreground">
-                                        <Package className="w-10 h-10 mx-auto mb-2 opacity-50 animate-pulse" />
-                                        <p>Loading inventory...</p>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                        {Array.from({ length: 8 }).map((_, i) => (
+                                            <div key={i} className="p-3 rounded-xl bg-accent/50 border border-border/50 space-y-3">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                                                    <div className="h-5 w-12 bg-muted/50 rounded animate-pulse" />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <div className="h-3 w-16 bg-muted/50 rounded animate-pulse" />
+                                                    <div className="flex justify-between">
+                                                        <div className="h-3 w-12 bg-muted/50 rounded animate-pulse" />
+                                                        <div className="h-3 w-14 bg-muted/50 rounded animate-pulse" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 ) : filteredMedicines.length === 0 ? (
-                                    <div className="text-center py-8 text-muted-foreground">
+                                    <div className="text-center py-6 text-muted-foreground">
                                         <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                                        <p>No medicines found</p>
+                                        <p className="mb-2">No medicines found matching "{debouncedSearchQuery}"</p>
+
+                                        {/* Alternative Drug Suggestions */}
+                                        {alternativeSuggestions.length > 0 && (
+                                            <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 text-left">
+                                                <p className="text-sm font-semibold text-emerald-400 mb-3 flex items-center gap-2">
+                                                    <Package className="w-4 h-4" />
+                                                    💊 Equivalent alternatives available:
+                                                </p>
+                                                <div className="space-y-2">
+                                                    {alternativeSuggestions.slice(0, 3).map((alt) => {
+                                                        const batch = alt.batches[0];
+                                                        return (
+                                                            <motion.button
+                                                                key={alt.id}
+                                                                className="w-full p-3 rounded-lg bg-accent/50 hover:bg-accent border border-emerald-500/30 hover:border-emerald-500/50 transition-all flex items-center justify-between group"
+                                                                whileHover={{ scale: 1.01 }}
+                                                                whileTap={{ scale: 0.99 }}
+                                                                onClick={() => addToCart(alt)}
+                                                            >
+                                                                <div className="text-left">
+                                                                    <p className="font-medium text-foreground text-sm">{alt.name}</p>
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {alt.generic_name} • {batch?.quantity || 0} in stock • ₹{batch?.selling_price.toFixed(2)}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium">
+                                                                    <span className="hidden group-hover:inline">Add to cart</span>
+                                                                    <ArrowRight className="w-4 h-4" />
+                                                                </div>
+                                                            </motion.button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-xs text-muted-foreground mt-2 italic">
+                                                    These are equivalent drugs with the same active ingredient ({alternativeSuggestions[0]?.generic_name})
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -768,16 +983,26 @@ export default function SalesPage() {
                                                 return (
                                                     <motion.div
                                                         key={medicine.id}
-                                                        initial={{ opacity: 0, scale: 0.9 }}
-                                                        animate={{ opacity: 1, scale: 1 }}
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
                                                         exit={{ opacity: 0, scale: 0.9 }}
-                                                        transition={{ duration: 0.15, delay: index * 0.02 }}
+                                                        transition={{
+                                                            type: "spring",
+                                                            stiffness: 300,
+                                                            damping: 25,
+                                                            delay: index * 0.03
+                                                        }}
                                                         layout
                                                     >
                                                         <motion.button
-                                                            className="w-full p-3 rounded-xl bg-accent/50 hover:bg-accent border border-transparent hover:border-primary/30 transition-all text-left group"
-                                                            whileHover={{ scale: 1.02 }}
-                                                            whileTap={{ scale: 0.98 }}
+                                                            className="w-full p-3 rounded-xl bg-accent/50 hover:bg-accent border border-transparent hover:border-primary/30 text-left group relative overflow-hidden"
+                                                            whileHover={{
+                                                                scale: 1.03,
+                                                                y: -4,
+                                                                boxShadow: "0 10px 40px -10px rgba(16, 185, 129, 0.3)",
+                                                            }}
+                                                            whileTap={{ scale: 0.97 }}
+                                                            transition={{ type: "spring", stiffness: 400, damping: 17 }}
                                                             onClick={() => addToCart(medicine)}
                                                         >
                                                             <div className="flex items-start justify-between mb-2">
@@ -939,12 +1164,17 @@ export default function SalesPage() {
                                             cart.map((item, index) => (
                                                 <motion.div
                                                     key={item.batchId}
-                                                    initial={{ opacity: 0, x: 20 }}
-                                                    animate={{ opacity: 1, x: 0 }}
-                                                    exit={{ opacity: 0, x: -20 }}
-                                                    transition={{ duration: 0.15, delay: index * 0.02 }}
+                                                    initial={{ opacity: 0, scale: 0.8, x: 30 }}
+                                                    animate={{ opacity: 1, scale: 1, x: 0 }}
+                                                    exit={{ opacity: 0, scale: 0.8, x: -30 }}
+                                                    transition={{
+                                                        type: "spring",
+                                                        stiffness: 400,
+                                                        damping: 20,
+                                                        delay: index * 0.05
+                                                    }}
                                                     layout
-                                                    className="flex flex-col gap-2 p-2 rounded-lg bg-accent/30"
+                                                    className="flex flex-col gap-2 p-2 rounded-lg bg-accent/30 hover:bg-accent/50 transition-colors"
                                                 >
                                                     <div className="flex items-center justify-between w-full">
                                                         <div className="flex-1 min-w-0 mr-2">
@@ -1121,123 +1351,212 @@ export default function SalesPage() {
             </Dialog>
 
             {/* Sales History Dialog */}
-            <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
+            <Dialog open={isHistoryOpen} onOpenChange={(open) => {
+                setIsHistoryOpen(open);
+                if (open) fetchAllSales();
+            }}>
                 <DialogContent className="max-w-7xl max-h-[90vh] glass-card">
                     <DialogHeader>
                         <DialogTitle className="text-2xl flex items-center gap-2">
                             <Receipt className="w-6 h-6 text-primary" />
-                            Sales History
+                            Receipt Search & History
                         </DialogTitle>
                         <DialogDescription>
-                            Complete transaction history with detailed breakdown
+                            Search past receipts by customer name, phone, or receipt ID. Reprint for insurance claims.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="overflow-y-auto max-h-[70vh] pr-2">
-                        {recentSales.length === 0 ? (
+
+                    {/* Search Controls */}
+                    <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Search by customer name, phone, or receipt ID..."
+                                className="pl-10 bg-background/50"
+                                value={historySearchQuery}
+                                onChange={(e) => setHistorySearchQuery(e.target.value)}
+                            />
+                        </div>
+                        <Input
+                            type="date"
+                            className="w-auto bg-background/50"
+                            value={historySearchDate}
+                            onChange={(e) => setHistorySearchDate(e.target.value)}
+                            placeholder="Filter by date"
+                        />
+                        {(historySearchQuery || historySearchDate) && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setHistorySearchQuery("");
+                                    setHistorySearchDate("");
+                                }}
+                            >
+                                Clear
+                            </Button>
+                        )}
+                    </div>
+
+                    <div className="overflow-y-auto max-h-[60vh] pr-2">
+                        {isHistoryLoading ? (
                             <div className="text-center py-16 text-muted-foreground">
-                                <Receipt className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                                <p className="text-lg font-medium">No sales recorded yet</p>
-                                <p className="text-sm">Start selling to see transaction history</p>
+                                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                <p className="text-sm">Loading receipts...</p>
                             </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {recentSales.map((sale, index) => {
-                                    const itemCount = sale.sale_items.reduce((sum, item) => sum + item.quantity, 0);
-                                    return (
-                                        <motion.div
-                                            key={sale.id}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: index * 0.05 }}
-                                            className="p-5 rounded-xl bg-accent/30 hover:bg-accent/50 border border-border/50 transition-all"
-                                        >
-                                            {/* Header Row */}
-                                            <div className="flex items-start justify-between mb-4">
-                                                <div className="flex items-start gap-4">
-                                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-pharma-emerald/20 flex items-center justify-center">
-                                                        <Receipt className="w-6 h-6 text-primary" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-mono text-base font-semibold mb-1">
-                                                            {sale.id.slice(0, 18)}
-                                                        </p>
-                                                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                                                            <div className="flex items-center gap-1">
-                                                                <User className="w-3.5 h-3.5" />
-                                                                <span>{sale.customer_name || "Walk-in"}</span>
+                        ) : (() => {
+                            // Use allSales if loaded, otherwise fall back to recentSales
+                            const salesSource = allSales.length > 0 ? allSales : recentSales;
+                            // Filter sales based on search query and date
+                            const salesToShow = salesSource.filter(sale => {
+                                const query = historySearchQuery.toLowerCase();
+                                const matchesQuery = !query ||
+                                    (sale.customer_name?.toLowerCase().includes(query)) ||
+                                    (sale.customer_phone?.includes(query)) ||
+                                    (sale.id.toLowerCase().includes(query));
+
+                                const matchesDate = !historySearchDate ||
+                                    new Date(sale.created_at).toISOString().startsWith(historySearchDate);
+
+                                return matchesQuery && matchesDate;
+                            });
+
+                            if (salesToShow.length === 0) {
+                                return (
+                                    <div className="text-center py-16 text-muted-foreground">
+                                        <Receipt className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                                        <p className="text-lg font-medium">
+                                            {historySearchQuery || historySearchDate
+                                                ? "No receipts match your search"
+                                                : "No sales recorded yet"}
+                                        </p>
+                                        <p className="text-sm">
+                                            {historySearchQuery || historySearchDate
+                                                ? "Try a different search term or date"
+                                                : "Start selling to see transaction history"}
+                                        </p>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div className="space-y-3">
+                                    <p className="text-sm text-muted-foreground mb-2">
+                                        Showing {salesToShow.length} receipt{salesToShow.length !== 1 ? 's' : ''}
+                                    </p>
+                                    {salesToShow.map((sale, index) => {
+                                        const itemCount = sale.sale_items.reduce((sum, item) => sum + item.quantity, 0);
+                                        return (
+                                            <motion.div
+                                                key={sale.id}
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ delay: index * 0.03 }}
+                                                className="p-5 rounded-xl bg-accent/30 hover:bg-accent/50 border border-border/50 transition-all"
+                                            >
+                                                {/* Header Row */}
+                                                <div className="flex items-start justify-between mb-4">
+                                                    <div className="flex items-start gap-4">
+                                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-pharma-emerald/20 flex items-center justify-center">
+                                                            <Receipt className="w-6 h-6 text-primary" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-mono text-base font-semibold mb-1">
+                                                                {sale.id.slice(0, 18)}
+                                                            </p>
+                                                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                                                                <div className="flex items-center gap-1">
+                                                                    <User className="w-3.5 h-3.5" />
+                                                                    <span>{sale.customer_name || "Walk-in"}</span>
+                                                                </div>
+                                                                {sale.customer_phone && (
+                                                                    <>
+                                                                        <span>•</span>
+                                                                        <span>{sale.customer_phone}</span>
+                                                                    </>
+                                                                )}
+                                                                <span>•</span>
+                                                                <div className="flex items-center gap-1">
+                                                                    <Clock className="w-3.5 h-3.5" />
+                                                                    <span>
+                                                                        {new Date(sale.created_at).toLocaleDateString('en-IN', {
+                                                                            day: '2-digit',
+                                                                            month: 'short',
+                                                                            year: 'numeric',
+                                                                            hour: '2-digit',
+                                                                            minute: '2-digit'
+                                                                        })}
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                            <span>•</span>
-                                                            <div className="flex items-center gap-1">
-                                                                <Clock className="w-3.5 h-3.5" />
-                                                                <span>
-                                                                    {new Date(sale.created_at).toLocaleDateString('en-IN', {
-                                                                        day: '2-digit',
-                                                                        month: 'short',
-                                                                        year: 'numeric',
-                                                                        hour: '2-digit',
-                                                                        minute: '2-digit'
-                                                                    })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="text-right">
+                                                            <p className="text-2xl font-bold text-emerald-500 mb-1">
+                                                                ₹{sale.total.toFixed(2)}
+                                                            </p>
+                                                            <Badge variant="outline" className="text-xs">
+                                                                {sale.payment_method.toUpperCase()}
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-primary hover:text-primary/80 hover:bg-primary/10"
+                                                                onClick={() => handleReprintReceipt(sale)}
+                                                                title="Reprint Receipt"
+                                                            >
+                                                                <Printer className="w-4 h-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                                                                onClick={() => handleEditSale(sale)}
+                                                            >
+                                                                <Pencil className="w-4 h-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                                                onClick={() => handleDeleteSale(sale)}
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Items Sold */}
+                                                <div className="pt-3 border-t border-border/50">
+                                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                                                        Items Sold ({itemCount} units)
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {sale.sale_items.map((item, idx) => (
+                                                            <div
+                                                                key={idx}
+                                                                className="px-3 py-1.5 rounded-lg bg-background/50 border border-border/50"
+                                                            >
+                                                                <span className="text-sm font-medium">
+                                                                    {item.medicines?.name || 'Unknown'}
+                                                                </span>
+                                                                <span className="text-xs text-muted-foreground ml-2">
+                                                                    ×{item.quantity}
                                                                 </span>
                                                             </div>
-                                                        </div>
+                                                        ))}
                                                     </div>
                                                 </div>
-                                                <div className="flex items-start gap-3">
-                                                    <div className="text-right">
-                                                        <p className="text-2xl font-bold text-emerald-500 mb-1">
-                                                            ₹{sale.total.toFixed(2)}
-                                                        </p>
-                                                        <Badge variant="outline" className="text-xs">
-                                                            {sale.payment_method.toUpperCase()}
-                                                        </Badge>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
-                                                            onClick={() => handleEditSale(sale)}
-                                                        >
-                                                            <Pencil className="w-4 h-4" />
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
-                                                            onClick={() => handleDeleteSale(sale)}
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Items Sold */}
-                                            <div className="pt-3 border-t border-border/50">
-                                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                                                    Items Sold ({itemCount} units)
-                                                </p>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {sale.sale_items.map((item, idx) => (
-                                                        <div
-                                                            key={idx}
-                                                            className="px-3 py-1.5 rounded-lg bg-background/50 border border-border/50"
-                                                        >
-                                                            <span className="text-sm font-medium">
-                                                                {item.medicines?.name || 'Unknown'}
-                                                            </span>
-                                                            <span className="text-xs text-muted-foreground ml-2">
-                                                                ×{item.quantity}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
-                            </div>
-                        )}
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })()}
                     </div>
                 </DialogContent>
             </Dialog>
@@ -1360,27 +1679,114 @@ export default function SalesPage() {
 
             {/* Success Dialog */}
             <Dialog open={isSuccessOpen} onOpenChange={setIsSuccessOpen}>
-                <DialogContent className="sm:max-w-[350px] glass-card text-center">
-                    <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center mb-4"
-                    >
-                        <CheckCircle className="w-10 h-10 text-white" />
-                    </motion.div>
-                    <DialogTitle className="text-xl">Payment Successful!</DialogTitle>
-                    <DialogDescription>
-                        Invoice #{lastInvoiceId.slice(0, 8)} has been created
-                    </DialogDescription>
-                    <div className="flex gap-3 pt-4">
-                        <Button variant="outline" className="flex-1 gap-2" onClick={handlePrint}>
-                            <Printer className="w-4 h-4" />
-                            Print
-                        </Button>
-                        <Button className="flex-1" onClick={() => setIsSuccessOpen(false)}>
-                            Done
-                        </Button>
+                <DialogContent className="sm:max-w-[400px] glass-card text-center overflow-hidden">
+                    {/* Animated background particles */}
+                    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                        {[...Array(6)].map((_, i) => (
+                            <motion.div
+                                key={i}
+                                className="absolute w-2 h-2 rounded-full bg-emerald-500/40"
+                                initial={{
+                                    x: 200,
+                                    y: 200,
+                                    scale: 0,
+                                    opacity: 0
+                                }}
+                                animate={{
+                                    x: [200, 100 + (i * 40), 50 + (i * 50)],
+                                    y: [200, 100 - (i * 30), 50 + (i * 20)],
+                                    scale: [0, 1.5, 0],
+                                    opacity: [0, 1, 0],
+                                }}
+                                transition={{
+                                    duration: 1.5,
+                                    delay: 0.2 + (i * 0.1),
+                                    ease: "easeOut"
+                                }}
+                            />
+                        ))}
                     </div>
+
+                    {/* Animated success icon with rings */}
+                    <div className="relative mx-auto mb-4">
+                        {/* Outer pulsing ring */}
+                        <motion.div
+                            className="absolute inset-0 rounded-full bg-emerald-500/20"
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: [0.8, 1.4, 1.4], opacity: [0, 0.5, 0] }}
+                            transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 0.5 }}
+                            style={{ width: 80, height: 80, top: 0, left: 0 }}
+                        />
+                        {/* Inner pulsing ring */}
+                        <motion.div
+                            className="absolute inset-0 rounded-full bg-emerald-500/30"
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: [0.8, 1.2, 1.2], opacity: [0, 0.6, 0] }}
+                            transition={{ duration: 1.5, delay: 0.2, repeat: Infinity, repeatDelay: 0.5 }}
+                            style={{ width: 80, height: 80, top: 0, left: 0 }}
+                        />
+                        {/* Main icon */}
+                        <motion.div
+                            initial={{ scale: 0, rotate: -180 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{
+                                type: "spring",
+                                stiffness: 260,
+                                damping: 20,
+                                delay: 0.1
+                            }}
+                            className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/30"
+                        >
+                            <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ delay: 0.3, type: "spring", stiffness: 400 }}
+                            >
+                                <CheckCircle className="w-10 h-10 text-white" />
+                            </motion.div>
+                        </motion.div>
+                    </div>
+
+                    {/* Animated title */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.4 }}
+                    >
+                        <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-teal-500 bg-clip-text text-transparent">
+                            Payment Successful!
+                        </DialogTitle>
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.5 }}
+                    >
+                        <DialogDescription className="text-base">
+                            Invoice <span className="font-mono text-primary">#{lastInvoiceId.slice(0, 8)}</span> has been created
+                        </DialogDescription>
+                    </motion.div>
+
+                    {/* Animated buttons */}
+                    <motion.div
+                        className="flex gap-3 pt-4"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.6 }}
+                    >
+                        <motion.div className="flex-1" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                            <Button variant="outline" className="w-full gap-2" onClick={handlePrint}>
+                                <Printer className="w-4 h-4" />
+                                Print Receipt
+                            </Button>
+                        </motion.div>
+                        <motion.div className="flex-1" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                            <Button className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:opacity-90" onClick={() => setIsSuccessOpen(false)}>
+                                Continue
+                            </Button>
+                        </motion.div>
+                    </motion.div>
                 </DialogContent>
             </Dialog>
 

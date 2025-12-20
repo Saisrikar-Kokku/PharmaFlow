@@ -137,44 +137,176 @@ function GridBackground() {
   );
 }
 
-// Animated pills floating in background
-function FloatingPills() {
+// Enhanced Pharma Background Animation
+function PharmaBackground() {
+  // Floating pills and capsules
   const pills = [
-    { x: 10, y: 20, delay: 0, size: 24 },
-    { x: 85, y: 15, delay: 1, size: 20 },
-    { x: 75, y: 60, delay: 2, size: 28 },
-    { x: 15, y: 70, delay: 0.5, size: 22 },
-    { x: 50, y: 80, delay: 1.5, size: 18 },
-    { x: 90, y: 40, delay: 2.5, size: 26 },
-    { x: 5, y: 45, delay: 3, size: 20 },
-    { x: 60, y: 25, delay: 0.8, size: 16 },
+    { x: 5, y: 15, delay: 0, size: 28, type: 'pill' },
+    { x: 92, y: 12, delay: 1.2, size: 24, type: 'capsule' },
+    { x: 78, y: 55, delay: 2.5, size: 32, type: 'pill' },
+    { x: 12, y: 65, delay: 0.8, size: 26, type: 'capsule' },
+    { x: 45, y: 85, delay: 1.8, size: 22, type: 'pill' },
+    { x: 88, y: 35, delay: 3.2, size: 30, type: 'capsule' },
+    { x: 8, y: 42, delay: 2.0, size: 24, type: 'pill' },
+    { x: 65, y: 18, delay: 0.5, size: 20, type: 'capsule' },
+    { x: 35, y: 75, delay: 1.5, size: 26, type: 'pill' },
+    { x: 55, y: 45, delay: 2.8, size: 22, type: 'capsule' },
+  ];
+
+  // Medical crosses
+  const crosses = [
+    { x: 25, y: 25, delay: 0.3, size: 18 },
+    { x: 70, y: 70, delay: 1.0, size: 16 },
+    { x: 85, y: 20, delay: 2.2, size: 14 },
+    { x: 15, y: 80, delay: 1.5, size: 20 },
+  ];
+
+  // Molecule dots (orbiting effect)
+  const molecules = [
+    { x: 20, y: 35, delay: 0 },
+    { x: 80, y: 45, delay: 1.5 },
+    { x: 50, y: 15, delay: 0.8 },
+    { x: 70, y: 80, delay: 2.2 },
   ];
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {pills.map((pill, i) => (
+      {/* Floating Pills & Capsules */}
+      {pills.map((item, i) => (
         <motion.div
-          key={i}
-          className="absolute text-primary/10"
-          style={{ left: `${pill.x}%`, top: `${pill.y}%` }}
+          key={`pill-${i}`}
+          className="absolute"
+          style={{ left: `${item.x}%`, top: `${item.y}%` }}
           animate={{
-            y: [-20, 20, -20],
-            rotate: [-10, 10, -10],
-            opacity: [0.1, 0.2, 0.1],
+            y: [-30, 30, -30],
+            x: [-10, 10, -10],
+            rotate: item.type === 'capsule' ? [-45, -35, -45] : [0, 15, 0],
+            opacity: [0.2, 0.4, 0.2],
           }}
           transition={{
-            duration: 6 + i,
-            delay: pill.delay,
+            duration: 8 + i * 0.5,
+            delay: item.delay,
             repeat: Infinity,
             ease: "easeInOut",
           }}
         >
-          <Pill style={{ width: pill.size, height: pill.size }} />
+          {item.type === 'pill' ? (
+            <Pill className="text-primary/60" style={{ width: item.size, height: item.size }} />
+          ) : (
+            <div
+              className="rounded-full bg-gradient-to-br from-primary/40 to-pharma-emerald/40"
+              style={{
+                width: item.size,
+                height: item.size * 2,
+                borderRadius: item.size,
+              }}
+            />
+          )}
         </motion.div>
       ))}
+
+      {/* Medical Crosses with pulse */}
+      {crosses.map((cross, i) => (
+        <motion.div
+          key={`cross-${i}`}
+          className="absolute"
+          style={{ left: `${cross.x}%`, top: `${cross.y}%` }}
+          animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.15, 0.3, 0.15],
+          }}
+          transition={{
+            duration: 4,
+            delay: cross.delay,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+        >
+          <div className="relative" style={{ width: cross.size, height: cross.size }}>
+            <div className="absolute left-1/2 top-0 -translate-x-1/2 w-[30%] h-full bg-primary/50 rounded-sm" />
+            <div className="absolute top-1/2 left-0 -translate-y-1/2 w-full h-[30%] bg-primary/50 rounded-sm" />
+          </div>
+        </motion.div>
+      ))}
+
+      {/* Orbiting Molecules */}
+      {molecules.map((mol, i) => (
+        <motion.div
+          key={`mol-${i}`}
+          className="absolute"
+          style={{ left: `${mol.x}%`, top: `${mol.y}%` }}
+        >
+          {/* Center atom */}
+          <motion.div
+            className="w-4 h-4 rounded-full bg-primary/40"
+            animate={{ scale: [1, 1.3, 1] }}
+            transition={{ duration: 2, repeat: Infinity, delay: mol.delay }}
+          />
+          {/* Orbiting electrons */}
+          {[0, 120, 240].map((angle, j) => (
+            <motion.div
+              key={j}
+              className="absolute w-3 h-3 rounded-full bg-pharma-emerald/50"
+              style={{ left: '3px', top: '3px' }}
+              animate={{
+                x: [Math.cos(angle * Math.PI / 180) * 20, Math.cos((angle + 360) * Math.PI / 180) * 20],
+                y: [Math.sin(angle * Math.PI / 180) * 20, Math.sin((angle + 360) * Math.PI / 180) * 20],
+              }}
+              transition={{
+                duration: 4 + j,
+                delay: mol.delay + j * 0.3,
+                repeat: Infinity,
+                ease: "linear",
+              }}
+            />
+          ))}
+        </motion.div>
+      ))}
+
+      {/* DNA Helix Effect */}
+      <div className="absolute left-[3%] top-[20%] h-[60%] w-10 opacity-30">
+        {[...Array(12)].map((_, i) => (
+          <motion.div
+            key={`dna-${i}`}
+            className="absolute w-full flex justify-between items-center"
+            style={{ top: `${i * 8}%` }}
+            animate={{
+              x: [0, i % 2 === 0 ? 15 : -15, 0],
+            }}
+            transition={{
+              duration: 3,
+              delay: i * 0.15,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+          >
+            <div className="w-3 h-3 rounded-full bg-primary" />
+            <div className="flex-1 h-px bg-gradient-to-r from-primary via-pharma-emerald to-primary mx-1" />
+            <div className="w-3 h-3 rounded-full bg-pharma-emerald" />
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Floating Rx Symbol */}
+      <motion.div
+        className="absolute right-[5%] top-[30%] text-6xl font-serif font-bold text-primary/30"
+        animate={{
+          y: [-20, 20, -20],
+          rotate: [-5, 5, -5],
+          opacity: [0.2, 0.4, 0.2],
+        }}
+        transition={{
+          duration: 8,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+      >
+        ℞
+      </motion.div>
     </div>
   );
 }
+
 
 // Animated stat card
 function StatCard({ stat, index }: { stat: typeof stats[0]; index: number }) {
@@ -330,7 +462,117 @@ export default function LandingPage() {
     <div className="min-h-screen overflow-x-hidden bg-background">
       {/* Animated backgrounds */}
       <GridBackground />
-      <FloatingPills />
+      <PharmaBackground />
+
+      {/* HERO ANIMATION - Big animated capsule with glow effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Center Hero Capsule */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          {/* Outer glow rings */}
+          <motion.div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full border border-primary/20"
+            animate={{
+              scale: [1, 1.3, 1],
+              opacity: [0.3, 0.1, 0.3],
+            }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full border border-pharma-emerald/30"
+            animate={{
+              scale: [1.1, 0.9, 1.1],
+              opacity: [0.2, 0.4, 0.2],
+            }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+          />
+          <motion.div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full border-2 border-primary/40"
+            animate={{
+              scale: [0.9, 1.2, 0.9],
+              opacity: [0.4, 0.2, 0.4],
+              rotate: [0, 360],
+            }}
+            transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+          />
+
+          {/* Giant Floating Capsule */}
+          <motion.div
+            className="relative"
+            animate={{
+              y: [-20, 20, -20],
+              rotate: [-15, -10, -15],
+            }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          >
+            {/* Capsule body */}
+            <div className="relative w-40 h-80">
+              {/* Top half - Primary color */}
+              <motion.div
+                className="absolute top-0 left-0 w-full h-1/2 rounded-t-full bg-gradient-to-br from-primary via-primary to-primary/80"
+                style={{ boxShadow: "0 0 60px rgba(16, 185, 129, 0.4), inset 0 -10px 30px rgba(0,0,0,0.2)" }}
+                animate={{
+                  boxShadow: [
+                    "0 0 60px rgba(16, 185, 129, 0.4), inset 0 -10px 30px rgba(0,0,0,0.2)",
+                    "0 0 100px rgba(16, 185, 129, 0.6), inset 0 -10px 30px rgba(0,0,0,0.2)",
+                    "0 0 60px rgba(16, 185, 129, 0.4), inset 0 -10px 30px rgba(0,0,0,0.2)",
+                  ]
+                }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
+                {/* Shine effect */}
+                <div className="absolute top-4 left-4 w-8 h-16 bg-white/30 rounded-full blur-sm transform -rotate-12" />
+              </motion.div>
+
+              {/* Bottom half - Emerald color */}
+              <motion.div
+                className="absolute bottom-0 left-0 w-full h-1/2 rounded-b-full bg-gradient-to-br from-pharma-emerald via-teal-500 to-teal-600"
+                style={{ boxShadow: "0 0 60px rgba(20, 184, 166, 0.4), inset 0 10px 30px rgba(0,0,0,0.2)" }}
+                animate={{
+                  boxShadow: [
+                    "0 0 60px rgba(20, 184, 166, 0.4), inset 0 10px 30px rgba(0,0,0,0.2)",
+                    "0 0 100px rgba(20, 184, 166, 0.6), inset 0 10px 30px rgba(0,0,0,0.2)",
+                    "0 0 60px rgba(20, 184, 166, 0.4), inset 0 10px 30px rgba(0,0,0,0.2)",
+                  ]
+                }}
+                transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
+              />
+
+              {/* Center divider line */}
+              <div className="absolute top-1/2 left-0 w-full h-1 bg-white/20 -translate-y-1/2" />
+            </div>
+          </motion.div>
+
+          {/* Orbiting particles around capsule */}
+          {[0, 60, 120, 180, 240, 300].map((angle, i) => (
+            <motion.div
+              key={`orbit-${i}`}
+              className="absolute left-1/2 top-1/2"
+              animate={{
+                rotate: [angle, angle + 360],
+              }}
+              transition={{
+                duration: 10 + i * 2,
+                repeat: Infinity,
+                ease: "linear",
+              }}
+              style={{ transformOrigin: "0 0" }}
+            >
+              <motion.div
+                className="w-3 h-3 rounded-full bg-primary"
+                style={{ transform: `translateX(${150 + i * 20}px) translateY(-6px)` }}
+                animate={{
+                  scale: [1, 1.5, 1],
+                  opacity: [0.6, 1, 0.6],
+                }}
+                transition={{ duration: 2, repeat: Infinity, delay: i * 0.3 }}
+              />
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Radial gradient overlay for depth */}
+        <div className="absolute inset-0 bg-gradient-radial from-transparent via-transparent to-background/80" />
+      </div>
 
       {/* Morphing blobs */}
       <MorphingBlob className="w-[600px] h-[600px] -top-40 -left-40 opacity-30" color="primary" />
@@ -545,6 +787,176 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, index) => (
               <FeatureCard key={index} feature={feature} index={index} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works Section */}
+      <section className="py-32 px-6 relative bg-gradient-to-b from-transparent via-primary/5 to-transparent">
+        <div className="container mx-auto">
+          <RevealOnScroll className="text-center mb-20">
+            <Badge variant="secondary" className="mb-6 px-5 py-2.5 bg-primary/10 text-primary border-primary/20">
+              <MousePointerClick className="w-4 h-4 mr-2" />
+              How It Works
+            </Badge>
+            <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6">
+              Get Started in <GradientText>3 Simple Steps</GradientText>
+            </h2>
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Transform your pharmacy operations in minutes, not months
+            </p>
+          </RevealOnScroll>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+            {[
+              {
+                step: "01",
+                title: "Add Your Inventory",
+                description: "Import your existing medicine data or add items manually. Our system auto-categorizes and tracks everything.",
+                icon: Package,
+                color: "from-emerald-500 to-teal-500",
+              },
+              {
+                step: "02",
+                title: "AI Analyzes Patterns",
+                description: "Our AI learns your sales patterns, seasonal trends, and demand fluctuations to predict future needs.",
+                icon: Bot,
+                color: "from-blue-500 to-cyan-500",
+              },
+              {
+                step: "03",
+                title: "Optimize & Profit",
+                description: "Get real-time alerts, smart reorder suggestions, and prevent expiry waste automatically.",
+                icon: TrendingUp,
+                color: "from-purple-500 to-pink-500",
+              },
+            ].map((item, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 40 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: index * 0.2 }}
+                className="relative"
+              >
+                {/* Connector line */}
+                {index < 2 && (
+                  <div className="hidden md:block absolute top-16 left-[60%] w-[80%] h-0.5 bg-gradient-to-r from-primary/50 to-transparent" />
+                )}
+
+                <TiltCard>
+                  <Card className="glass-card border-white/10 h-full text-center p-8 relative overflow-hidden group">
+                    {/* Step number */}
+                    <div className="absolute -top-4 -right-4 text-9xl font-bold text-primary/5 select-none">
+                      {item.step}
+                    </div>
+
+                    <motion.div
+                      className={`w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center relative`}
+                      whileHover={{ scale: 1.1, rotate: 5 }}
+                    >
+                      <item.icon className="w-10 h-10 text-white" />
+                      <motion.div
+                        className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${item.color} blur-xl opacity-50`}
+                        animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+                        transition={{ duration: 3, repeat: Infinity }}
+                      />
+                    </motion.div>
+
+                    <div className="text-sm font-bold text-primary mb-2">STEP {item.step}</div>
+                    <h3 className="text-2xl font-bold mb-4">{item.title}</h3>
+                    <p className="text-muted-foreground leading-relaxed">{item.description}</p>
+                  </Card>
+                </TiltCard>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Key Capabilities Section */}
+      <section className="py-32 px-6 relative">
+        <div className="container mx-auto">
+          <RevealOnScroll className="text-center mb-20">
+            <Badge variant="secondary" className="mb-6 px-5 py-2.5 bg-primary/10 text-primary border-primary/20">
+              <Zap className="w-4 h-4 mr-2" />
+              Key Capabilities
+            </Badge>
+            <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6">
+              What PharmaFlow <GradientText>Can Do For You</GradientText>
+            </h2>
+          </RevealOnScroll>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            {[
+              {
+                title: "Expiry Management",
+                description: "Never lose money on expired medicines again. Our FEFO system automatically prioritizes selling medicines closest to expiry first.",
+                features: ["Automatic expiry tracking", "FEFO-based sales flow", "30/60/90 day alerts", "Expiry batch reports"],
+                icon: Clock,
+                color: "from-amber-500 to-orange-500",
+              },
+              {
+                title: "Intelligent Forecasting",
+                description: "AI-powered demand prediction that learns from your sales history and seasonal patterns to suggest optimal stock levels.",
+                features: ["Seasonal trend detection", "Demand spike prediction", "Smart reorder points", "Market trend analysis"],
+                icon: TrendingUp,
+                color: "from-emerald-500 to-teal-500",
+              },
+              {
+                title: "Sales & Billing",
+                description: "Lightning-fast POS system with batch-aware billing, invoice generation, and complete sales analytics.",
+                features: ["Quick checkout flow", "Batch-aware billing", "Invoice generation", "Sales history tracking"],
+                icon: BarChart3,
+                color: "from-blue-500 to-cyan-500",
+              },
+              {
+                title: "AI Pharmacy Assistant",
+                description: "Ask questions in plain English and get instant answers about your inventory, sales, and operations.",
+                features: ["Natural language queries", "Stock recommendations", "Drug alternatives", "Usage instructions"],
+                icon: Bot,
+                color: "from-purple-500 to-pink-500",
+              },
+            ].map((capability, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, x: index % 2 === 0 ? -40 : 40 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: index * 0.1 }}
+              >
+                <Card className="glass-card border-white/10 h-full group hover:border-primary/30 transition-all duration-500">
+                  <CardContent className="p-8">
+                    <div className="flex gap-6">
+                      <motion.div
+                        className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${capability.color} flex items-center justify-center flex-shrink-0`}
+                        whileHover={{ scale: 1.1, rotate: 5 }}
+                      >
+                        <capability.icon className="w-8 h-8 text-white" />
+                      </motion.div>
+
+                      <div className="flex-1">
+                        <h3 className="text-2xl font-bold mb-3 group-hover:text-primary transition-colors">
+                          {capability.title}
+                        </h3>
+                        <p className="text-muted-foreground mb-4 leading-relaxed">
+                          {capability.description}
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {capability.features.map((feature, i) => (
+                            <div key={i} className="flex items-center gap-2 text-sm">
+                              <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                              <span className="text-muted-foreground">{feature}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
             ))}
           </div>
         </div>

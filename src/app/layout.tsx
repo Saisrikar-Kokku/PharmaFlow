@@ -15,10 +15,16 @@ export const metadata: Metadata = {
   description: "Intelligent Forecasting & Expiry Management System - Prevent waste, predict demand, and optimize your pharmacy operations.",
   keywords: ["pharmacy", "inventory", "forecasting", "FEFO", "medicine management", "healthcare"],
   authors: [{ name: "PharmaFlow" }],
+  icons: {
+    icon: "/logo.jpg",
+    shortcut: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
   openGraph: {
     title: "PharmaFlow | Smart Pharmacy Inventory",
     description: "Intelligent Forecasting & Expiry Management System",
     type: "website",
+    images: ["/logo.jpg"],
   },
 };
 

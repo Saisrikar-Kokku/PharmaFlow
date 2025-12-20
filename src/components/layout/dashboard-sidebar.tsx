@@ -114,7 +114,12 @@ export function DashboardSidebar({ children }: DashboardSidebarProps) {
                                         transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                     />
                                 )}
-                                <item.icon className={cn("w-5 h-5 flex-shrink-0", isActive && "text-primary")} />
+                                <motion.div
+                                    whileHover={{ rotate: [0, -10, 10, 0], scale: 1.1 }}
+                                    transition={{ duration: 0.3 }}
+                                >
+                                    <item.icon className={cn("w-5 h-5 flex-shrink-0", isActive && "text-primary")} />
+                                </motion.div>
                                 {!isCollapsed && (
                                     <span className="font-medium text-sm">{item.title}</span>
                                 )}
@@ -149,14 +154,18 @@ export function DashboardSidebar({ children }: DashboardSidebarProps) {
         <div className="flex flex-col h-full">
             {/* Logo */}
             <div className={cn(
-                "flex items-center gap-3 px-4 py-6",
+                "flex items-center gap-3 px-4 py-5",
                 isCollapsed && "justify-center px-2"
             )}>
                 <motion.div
-                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-pharma-emerald flex items-center justify-center flex-shrink-0"
+                    className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden"
                     whileHover={{ scale: 1.05, rotate: 5 }}
                 >
-                    <Pill className="w-5 h-5 text-white" />
+                    <img
+                        src="/logo.jpg"
+                        alt="PharmaFlow"
+                        className="w-full h-full object-cover"
+                    />
                 </motion.div>
                 {!isCollapsed && (
                     <motion.span
