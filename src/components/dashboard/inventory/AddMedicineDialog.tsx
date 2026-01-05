@@ -13,8 +13,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
+interface Category {
+    id: string;
+    name: string;
+}
+
 interface AddMedicineDialogProps {
-    categories: any[];
+    categories: Category[];
     onSuccess: () => void;
 }
 
@@ -29,6 +34,7 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
         generic_name: "",
         category_id: "",
         sku: "",
+        barcode: "",
         dosage_form: "tablet",
         reorder_level: 50,
         max_stock_level: 500,
@@ -82,6 +88,7 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                     generic_name: newMedicine.generic_name || null,
                     category_id: newMedicine.category_id,
                     sku: newMedicine.sku,
+                    barcode: newMedicine.barcode || null,
                     dosage_form: newMedicine.dosage_form,
                     reorder_level: newMedicine.reorder_level,
                     max_stock_level: newMedicine.max_stock_level,
@@ -123,6 +130,7 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                 generic_name: "",
                 category_id: "",
                 sku: "",
+                barcode: "",
                 dosage_form: "tablet",
                 reorder_level: 50,
                 max_stock_level: 500,
@@ -140,7 +148,10 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                 location: "Main Storage",
             });
 
-            onSuccess(); // Triggers refresh in parent
+            // Small delay to ensure database has committed changes before refresh
+            setTimeout(() => {
+                onSuccess(); // Triggers refresh in parent
+            }, 100);
         } catch (error) {
             console.error("Error adding medicine:", error);
             toast.error("Failed to add medicine");
@@ -152,21 +163,21 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
     return (
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <DialogTrigger asChild>
-                <Button className="gap-2 bg-gradient-to-r from-primary to-pharma-emerald hover:opacity-90">
+                <Button className="gap-2 bg-linear-to-r from-primary to-pharma-emerald hover:opacity-90">
                     <Plus className="w-4 h-4" />Add Medicine
                 </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-6xl glass-card overflow-hidden p-0 gap-0 border-white/10 ring-1 ring-white/20 shadow-2xl">
                 <div className="flex flex-col h-[85vh] lg:h-auto max-h-[90vh]">
                     {/* Header */}
-                    <DialogHeader className="p-8 border-b bg-gradient-to-br from-primary/5 via-transparent to-accent/5 relative overflow-hidden shrink-0">
+                    <DialogHeader className="p-8 border-b bg-linear-to-br from-primary/5 via-transparent to-accent/5 relative overflow-hidden shrink-0">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
                         <div className="flex items-center gap-4 relative z-10">
                             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-inner">
                                 <Pill className="w-8 h-8 text-primary shadow-sm" />
                             </div>
                             <div>
-                                <DialogTitle className="text-3xl font-black bg-gradient-to-r from-primary via-primary/80 to-pharma-emerald bg-clip-text text-transparent tracking-tight">Add New Medicine</DialogTitle>
+                                <DialogTitle className="text-3xl font-black bg-linear-to-r from-primary via-primary/80 to-pharma-emerald bg-clip-text text-transparent tracking-tight">Add New Medicine</DialogTitle>
                                 <DialogDescription className="text-lg text-muted-foreground font-medium">Create a new product record and initialize your stock levels.</DialogDescription>
                             </div>
                         </div>
@@ -229,6 +240,19 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                                             />
                                         </div>
                                     </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <Label className="text-xs font-bold uppercase tracking-widest text-foreground/60 ml-1">Barcode / UPC</Label>
+                                            <Input
+                                                className="h-14 text-xl font-mono px-5 rounded-2xl bg-background/50 border-primary/10 transition-all focus:border-primary/50"
+                                                placeholder="8901234567890"
+                                                value={newMedicine.barcode}
+                                                onChange={(e) => setNewMedicine({ ...newMedicine, barcode: e.target.value })}
+                                            />
+                                            <p className="text-xs text-muted-foreground ml-1">Enter barcode from product packaging for quick scanning</p>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="space-y-6 pt-6 border-t border-border/40">
@@ -273,7 +297,7 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
 
                             {/* Right Panel: Inventory Controls & Initial Stock */}
                             <div className="lg:col-span-12 xl:col-span-5 space-y-8">
-                                <Card className="border-0 shadow-sm bg-gradient-to-br from-accent/50 to-background rounded-[2rem] overflow-hidden">
+                                <Card className="border-0 shadow-sm bg-linear-to-br from-accent/50 to-background rounded-[2rem] overflow-hidden">
                                     <CardContent className="p-8 space-y-8">
                                         <div className="flex items-center gap-2">
                                             <Settings2 className="w-5 h-5 text-primary" />
@@ -331,8 +355,8 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                                             exit={{ opacity: 0, x: 20, filter: "blur(10px)" }}
                                             transition={{ type: "spring", damping: 20 }}
                                         >
-                                            <Card className="border-0 shadow-2xl bg-gradient-to-br from-white/80 to-accent/20 dark:from-card dark:to-accent/5 rounded-[2rem] overflow-hidden ring-1 ring-primary/20">
-                                                <div className="h-2 bg-gradient-to-r from-primary via-pharma-emerald to-primary w-full opacity-30" />
+                                            <Card className="border-0 shadow-2xl bg-linear-to-br from-white/80 to-accent/20 dark:from-card dark:to-accent/5 rounded-[2rem] overflow-hidden ring-1 ring-primary/20">
+                                                <div className="h-2 bg-linear-to-r from-primary via-pharma-emerald to-primary w-full opacity-30" />
                                                 <CardContent className="p-8 space-y-8">
                                                     <div className="flex items-center justify-between pb-2 border-b border-primary/10">
                                                         <div className="flex items-center gap-3">
@@ -428,7 +452,7 @@ export default function AddMedicineDialog({ categories, onSuccess }: AddMedicine
                             </Button>
                             <Button
                                 size="lg"
-                                className="bg-gradient-to-r from-primary to-pharma-emerald hover:shadow-lg hover:shadow-primary/20 rounded-xl px-10 h-12 text-lg font-bold"
+                                className="bg-linear-to-r from-primary to-pharma-emerald hover:shadow-lg hover:shadow-primary/20 rounded-xl px-10 h-12 text-lg font-bold"
                                 onClick={handleAddMedicine}
                                 disabled={isSubmitting}
                             >

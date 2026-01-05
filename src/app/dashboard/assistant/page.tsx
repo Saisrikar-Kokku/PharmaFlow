@@ -35,6 +35,8 @@ import {
     CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
+import { PermissionDenied, hasPermission, UserRole } from "@/lib/permissions";
 
 interface Message {
     role: "user" | "assistant";
@@ -79,8 +81,28 @@ export default function AssistantPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
+    const [loading, setLoading] = useState(true);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const supabase = createClient();
+
+    // Fetch current user's role
+    useEffect(() => {
+        async function fetchUserRole() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase
+                    .from("profiles")
+                    .select("role")
+                    .eq("id", user.id)
+                    .single();
+                if (data) setUserRole(data.role as UserRole);
+            }
+            setLoading(false);
+        }
+        fetchUserRole();
+    }, []);
 
     //Load conversation from localStorage on mount
     useEffect(() => {
@@ -212,6 +234,29 @@ export default function AssistantPage() {
         a.click();
         toast.success("Chat exported!");
     };
+
+    // Show loading state
+    if (loading) {
+        return (
+            <div className="p-6 lg:p-8 flex items-center justify-center min-h-[60vh]">
+                <div className="text-center">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+                    <p className="text-muted-foreground mt-4">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Permission check - only admin and pharmacist can use AI assistant
+    if (!hasPermission(userRole, "USE_ASSISTANT")) {
+        return (
+            <PermissionDenied
+                userRole={userRole}
+                requiredRoles={["admin", "pharmacist"]}
+                feature="use the AI Assistant"
+            />
+        );
+    }
 
     return (
         <div className="p-6 lg:p-8 h-[calc(100vh-4rem)] flex flex-col gap-6">

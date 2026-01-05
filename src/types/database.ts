@@ -541,9 +541,15 @@ export type Database = {
                     category_id: string;
                     category_name: string | null;
                     sku: string;
+                    barcode: string | null;
+                    dosage_form: string | null;
+                    requires_prescription: boolean | null;
+                    is_active: boolean | null;
+                    max_stock_level: number | null;
                     total_stock: number;
                     reorder_level: number;
                     is_low_stock: boolean;
+                    is_out_of_stock: boolean | null;
                 };
             };
 

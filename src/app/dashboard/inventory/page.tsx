@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ import { Label } from "@/components/ui/label";
 import { TiltCard, GradientText, RevealOnScroll } from "@/components/ui/animated";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { hasPermission, getPermissionDeniedMessage, UserRole } from "@/lib/permissions";
 import nextDynamic from 'next/dynamic';
 const InventoryDataActions = nextDynamic(() => import('@/components/dashboard/inventory/InventoryDataActions'), { ssr: false });
 const AddMedicineDialog = nextDynamic(() => import('@/components/dashboard/inventory/AddMedicineDialog'), { ssr: false });
@@ -77,7 +78,9 @@ import {
     FileSpreadsheet,
     FileDown,
     ChevronLeft,
+    ScanBarcode,
 } from "lucide-react";
+import { BarcodeScanner } from "@/components/ui/barcode-scanner";
 
 interface Medicine {
     id: string;
@@ -86,6 +89,7 @@ interface Medicine {
     category_id: string;
     category_name?: string;
     sku: string;
+    barcode?: string | null;
     dosage_form: string;
     reorder_level: number;
     max_stock_level?: number;
@@ -149,10 +153,10 @@ export default function InventoryPage() {
     const [currentPage, setCurrentPage] = useState(1);
 
     // Dialog states
-    // Dialog states
     const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     // Selected medicine states
     const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
@@ -162,6 +166,7 @@ export default function InventoryPage() {
     // Form states
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
 
     const [editMedicine, setEditMedicine] = useState({
         id: "",
@@ -223,18 +228,83 @@ export default function InventoryPage() {
         fetchMedicines();
         fetchCategories();
         fetchSuppliers();
+        fetchUserRole();
     }, []);
+
+    async function fetchUserRole() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("id", user.id)
+                .single();
+            if (data) setUserRole(data.role as UserRole);
+        }
+    }
 
     async function fetchMedicines() {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            // First try the view (if it has all fields including barcode)
+            const { data: viewData, error: viewError } = await supabase
                 .from("medicines_with_stock")
                 .select("*")
                 .order("name");
 
-            if (error) throw error;
-            setMedicines(data || []);
+            if (!viewError && viewData) {
+                setMedicines(viewData);
+            } else {
+                // Fallback: query medicines table directly with stock calculation
+                const { data: medicinesData, error: medicinesError } = await supabase
+                    .from("medicines")
+                    .select(`
+                        id,
+                        name,
+                        generic_name,
+                        category_id,
+                        sku,
+                        barcode,
+                        dosage_form,
+                        reorder_level,
+                        max_stock_level,
+                        requires_prescription,
+                        is_active,
+                        categories(name),
+                        batches(quantity)
+                    `)
+                    .order("name");
+
+                if (medicinesError) throw medicinesError;
+
+                // Transform data to match expected format
+                const transformedData: Medicine[] = (medicinesData || []).map((med: Record<string, unknown>) => {
+                    const batches = med.batches as Array<{ quantity: number }> | null;
+                    const category = med.categories as { name: string } | null;
+                    const totalStock = batches?.reduce((sum, b) => sum + (b.quantity || 0), 0) || 0;
+                    const reorderLevel = med.reorder_level as number || 50;
+                    
+                    return {
+                        id: med.id as string,
+                        name: med.name as string,
+                        generic_name: med.generic_name as string | null,
+                        category_id: med.category_id as string,
+                        category_name: category?.name || undefined,
+                        sku: med.sku as string,
+                        barcode: med.barcode as string | null | undefined,
+                        dosage_form: med.dosage_form as string,
+                        reorder_level: reorderLevel,
+                        max_stock_level: med.max_stock_level as number | undefined,
+                        requires_prescription: med.requires_prescription as boolean | undefined,
+                        is_active: med.is_active as boolean,
+                        total_stock: totalStock,
+                        is_low_stock: totalStock > 0 && totalStock <= reorderLevel,
+                        is_out_of_stock: totalStock === 0,
+                    };
+                });
+
+                setMedicines(transformedData);
+            }
         } catch (error) {
             console.error("Error fetching medicines:", error);
             toast.error("Failed to load medicines");
@@ -461,10 +531,25 @@ export default function InventoryPage() {
     async function handleDeleteBatch(batchId: string) {
         if (!selectedMedicine) return;
 
+        // Permission check - only admin can delete batches
+        if (!hasPermission(userRole, "DELETE_BATCH")) {
+            toast.error(getPermissionDeniedMessage("delete batches", ["admin"]), {
+                duration: 4000,
+            });
+            return;
+        }
+
         try {
             const { error } = await supabase.from("batches").delete().eq("id", batchId);
 
-            if (error) throw error;
+            if (error) {
+                // Check for foreign key constraint error (batch has been sold)
+                if (error.code === "23503") {
+                    toast.error("Cannot delete this batch - it has been sold. You can only set quantity to 0.");
+                    return;
+                }
+                throw error;
+            }
 
             // Refetch batches from database to ensure consistency
             const { data: freshBatches } = await supabase
@@ -593,15 +678,32 @@ export default function InventoryPage() {
     async function handleDeleteConfirm() {
         if (!selectedMedicine) return;
 
+        // Permission check - only admin can delete medicines
+        if (!hasPermission(userRole, "DELETE_MEDICINE")) {
+            toast.error(getPermissionDeniedMessage("delete medicines", ["admin"]), {
+                duration: 4000,
+            });
+            setIsDeleteDialogOpen(false);
+            return;
+        }
+
         setIsDeleting(true);
         try {
-            // First delete all associated batches
+            // First try to delete all associated batches
             const { error: batchError } = await supabase
                 .from("batches")
                 .delete()
                 .eq("medicine_id", selectedMedicine.id);
 
             if (batchError) {
+                // Check for foreign key constraint error (batches have sales)
+                if (batchError.code === "23503") {
+                    toast.error("Cannot delete this medicine - it has sales history. You can set stock to 0 and disable it instead.", {
+                        duration: 5000,
+                    });
+                    setIsDeleteDialogOpen(false);
+                    return;
+                }
                 console.error("Error deleting batches:", batchError);
             }
 
@@ -617,7 +719,17 @@ export default function InventoryPage() {
                 .delete()
                 .eq("id", selectedMedicine.id);
 
-            if (error) throw error;
+            if (error) {
+                // Check for foreign key constraint error
+                if (error.code === "23503") {
+                    toast.error("Cannot delete this medicine - it has related records. You can set stock to 0 instead.", {
+                        duration: 5000,
+                    });
+                    setIsDeleteDialogOpen(false);
+                    return;
+                }
+                throw error;
+            }
 
             toast.success("Medicine and all related data deleted successfully!");
             setIsDeleteDialogOpen(false);
@@ -636,32 +748,69 @@ export default function InventoryPage() {
 
 
 
-    const filteredMedicines = medicines
-        .filter((med) => {
+    // Memoize filtered medicines for performance
+    const filteredMedicines = useMemo(() => {
+        return medicines.filter((med) => {
             const matchesSearch =
                 med.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
                 med.sku.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+                (med.barcode?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ?? false) ||
                 (med.generic_name?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ?? false);
             const matchesCategory = selectedCategory === "all" || med.category_id === selectedCategory;
             const matchesStatus = statusFilter === "all" || getStockStatus(med) === statusFilter;
             return matchesSearch && matchesCategory && matchesStatus;
-        })
+        });
+    }, [medicines, debouncedSearchQuery, selectedCategory, statusFilter])
         .sort((a, b) => {
             if (sortBy === "name") return a.name.localeCompare(b.name);
             if (sortBy === "stock") return (b.total_stock || 0) - (a.total_stock || 0);
             return 0;
         });
 
-    const totalPages = Math.ceil(filteredMedicines.length / itemsPerPage);
-    const paginatedMedicines = filteredMedicines.slice(
-        (currentPage - 1) * itemsPerPage,
-        currentPage * itemsPerPage
-    );
+    // Barcode scan handler - finds medicine by barcode and opens view dialog
+    const handleBarcodeScan = (barcode: string) => {
+        const cleanBarcode = barcode.trim();
+        
+        // Search for medicine by barcode or SKU
+        const foundMedicine = medicines.find(
+            (med) => 
+                (med.barcode && med.barcode.toLowerCase() === cleanBarcode.toLowerCase()) ||
+                med.sku.toLowerCase() === cleanBarcode.toLowerCase()
+        );
 
-    const totalMedicines = medicines.length;
-    const lowStockCount = medicines.filter((m) => m.is_low_stock).length;
-    const outOfStockCount = medicines.filter((m) => m.is_out_of_stock || m.total_stock === 0).length;
-    const totalStock = medicines.reduce((sum, m) => sum + (m.total_stock || 0), 0);
+        if (foundMedicine) {
+            handleView(foundMedicine);
+            setIsScannerOpen(false);
+            toast.success(`Found: ${foundMedicine.name}`, {
+                icon: "📦",
+            });
+        } else {
+            toast.error(`No product found for barcode: ${cleanBarcode}`, {
+                description: "Check if the barcode is registered in inventory",
+                duration: 4000,
+            });
+        }
+    };
+
+    // Memoize pagination calculations
+    const totalPages = useMemo(() => Math.ceil(filteredMedicines.length / itemsPerPage), [filteredMedicines.length, itemsPerPage]);
+    const paginatedMedicines = useMemo(() => {
+        return filteredMedicines.slice(
+            (currentPage - 1) * itemsPerPage,
+            currentPage * itemsPerPage
+        );
+    }, [filteredMedicines, currentPage, itemsPerPage]);
+
+    // Memoize stats calculations
+    const stats = useMemo(() => {
+        const totalMedicines = medicines.length;
+        const lowStockCount = medicines.filter((m) => m.is_low_stock).length;
+        const outOfStockCount = medicines.filter((m) => m.is_out_of_stock || m.total_stock === 0).length;
+        const totalStock = medicines.reduce((sum, m) => sum + (m.total_stock || 0), 0);
+        return { totalMedicines, lowStockCount, outOfStockCount, totalStock };
+    }, [medicines]);
+    
+    const { totalMedicines, lowStockCount, outOfStockCount, totalStock } = stats;
 
     return (
         <div className="p-6 lg:p-8 space-y-6">
@@ -712,9 +861,21 @@ export default function InventoryPage() {
                 <Card className="glass-card border-white/10">
                     <CardContent className="p-4">
                         <div className="flex flex-col lg:flex-row gap-4">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input placeholder="Search medicines, SKU, or generic name..." className="pl-10 bg-background/50" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                            <div className="flex gap-2 flex-1">
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                    <Input placeholder="Search medicines, SKU, barcode..." className="pl-10 bg-background/50" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                                </div>
+                                {/* Barcode Scanner Button */}
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="shrink-0 hover:border-primary hover:bg-primary/10"
+                                    onClick={() => setIsScannerOpen(true)}
+                                    title="Scan Barcode"
+                                >
+                                    <ScanBarcode className="w-4 h-4" />
+                                </Button>
                             </div>
                             <div className="flex flex-wrap gap-3">
                                 <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -1346,6 +1507,15 @@ export default function InventoryPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Barcode Scanner Dialog */}
+            <BarcodeScanner
+                mode="dialog"
+                isOpen={isScannerOpen}
+                onOpenChange={setIsScannerOpen}
+                onScan={handleBarcodeScan}
+                placeholder="Scan product barcode to view details..."
+            />
         </div>
     );
 }

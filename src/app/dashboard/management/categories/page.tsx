@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { hasPermission, getPermissionDeniedMessage, UserRole } from "@/lib/permissions";
 
 interface Category {
     id: string;
@@ -90,12 +91,26 @@ export default function CategoriesPage() {
         color: "bg-blue-500",
     });
     const [saving, setSaving] = useState(false);
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
 
     const supabase = createClient();
 
     useEffect(() => {
         fetchCategories();
+        fetchUserRole();
     }, []);
+
+    async function fetchUserRole() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("id", user.id)
+                .single();
+            if (data) setUserRole(data.role as UserRole);
+        }
+    }
 
     async function fetchCategories() {
         try {
@@ -128,6 +143,12 @@ export default function CategoriesPage() {
     }
 
     async function handleAddCategory() {
+        // Permission check - only admin can add categories
+        if (!hasPermission(userRole, "ADD_CATEGORY")) {
+            toast.error(getPermissionDeniedMessage("add categories", ["admin"]));
+            return;
+        }
+
         if (!formData.name.trim()) {
             toast.error("Category name is required");
             return;
@@ -159,6 +180,12 @@ export default function CategoriesPage() {
     async function handleEditCategory() {
         if (!selectedCategory || !formData.name.trim()) return;
 
+        // Permission check - only admin can edit categories
+        if (!hasPermission(userRole, "EDIT_CATEGORY")) {
+            toast.error(getPermissionDeniedMessage("edit categories", ["admin"]));
+            return;
+        }
+
         try {
             setSaving(true);
             const { error } = await supabase
@@ -186,6 +213,13 @@ export default function CategoriesPage() {
 
     async function handleDeleteCategory() {
         if (!selectedCategory) return;
+
+        // Permission check - only admin can delete categories
+        if (!hasPermission(userRole, "DELETE_CATEGORY")) {
+            toast.error(getPermissionDeniedMessage("delete categories", ["admin"]));
+            setIsDeleteDialogOpen(false);
+            return;
+        }
 
         try {
             setSaving(true);

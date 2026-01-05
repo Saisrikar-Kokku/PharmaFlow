@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { PermissionDenied, hasPermission, getPermissionDeniedMessage, UserRole } from "@/lib/permissions";
 
 interface User {
     id: string;
@@ -260,6 +261,17 @@ export default function UsersPage() {
                     <p className="text-muted-foreground mt-4">Loading users...</p>
                 </div>
             </div>
+        );
+    }
+
+    // Permission check - only admin can access Users management
+    if (!isAdmin) {
+        return (
+            <PermissionDenied
+                userRole={currentUser?.role as UserRole}
+                requiredRoles={["admin"]}
+                feature="manage users"
+            />
         );
     }
 

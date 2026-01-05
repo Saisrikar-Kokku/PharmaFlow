@@ -94,7 +94,7 @@ export function DashboardSidebar({ children }: DashboardSidebarProps) {
             <TooltipProvider delayDuration={0}>
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <Link href={item.href}>
+                        <Link href={item.href} prefetch={true}>
                             <motion.div
                                 className={cn(
                                     "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all relative group",

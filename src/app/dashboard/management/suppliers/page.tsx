@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { hasPermission, getPermissionDeniedMessage, UserRole } from "@/lib/permissions";
 
 interface Supplier {
     id: string;
@@ -88,12 +89,26 @@ export default function SuppliersPage() {
         payment_terms: "Net 30",
     });
     const [saving, setSaving] = useState(false);
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
 
     const supabase = createClient();
 
     useEffect(() => {
         fetchSuppliers();
+        fetchUserRole();
     }, []);
+
+    async function fetchUserRole() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("id", user.id)
+                .single();
+            if (data) setUserRole(data.role as UserRole);
+        }
+    }
 
     async function fetchSuppliers() {
         try {
@@ -126,6 +141,12 @@ export default function SuppliersPage() {
     }
 
     async function handleAddSupplier() {
+        // Permission check - only admin can add suppliers
+        if (!hasPermission(userRole, "ADD_SUPPLIER")) {
+            toast.error(getPermissionDeniedMessage("add suppliers", ["admin"]));
+            return;
+        }
+
         if (!formData.name.trim()) {
             toast.error("Supplier name is required");
             return;
@@ -164,6 +185,12 @@ export default function SuppliersPage() {
     async function handleEditSupplier() {
         if (!selectedSupplier || !formData.name.trim()) return;
 
+        // Permission check - only admin can edit suppliers
+        if (!hasPermission(userRole, "EDIT_SUPPLIER")) {
+            toast.error(getPermissionDeniedMessage("edit suppliers", ["admin"]));
+            return;
+        }
+
         try {
             setSaving(true);
             const { error } = await supabase
@@ -198,6 +225,13 @@ export default function SuppliersPage() {
 
     async function handleDeleteSupplier() {
         if (!selectedSupplier) return;
+
+        // Permission check - only admin can delete suppliers
+        if (!hasPermission(userRole, "DELETE_SUPPLIER")) {
+            toast.error(getPermissionDeniedMessage("delete suppliers", ["admin"]));
+            setIsDeleteDialogOpen(false);
+            return;
+        }
 
         try {
             setSaving(true);

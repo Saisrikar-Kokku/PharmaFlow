@@ -1,0 +1,194 @@
+# PharmaFlow - Smart Pharmacy Inventory Management
+
+## Project Summary
+
+**PharmaFlow** is a modern, AI-powered pharmacy inventory management system built with Next.js 16, Supabase, and TypeScript. It helps pharmacies manage inventory, predict demand, prevent medicine expiry waste, and optimize sales operations.
+
+## Tech Stack
+
+| Technology | Purpose |
+|------------|---------|
+| **Next.js 16** | React framework with App Router |
+| **TypeScript** | Type-safe development |
+| **Supabase** | Backend (PostgreSQL + Auth + RLS) |
+| **Tailwind CSS v4** | Styling |
+| **Framer Motion** | Animations |
+| **Shadcn/ui + Radix** | UI Components |
+| **Groq (Llama 3.3)** | AI Assistant & Forecasting |
+| **Recharts** | Charts & visualizations |
+| **React Hook Form + Zod** | Forms & validation |
+
+## Key Features
+
+### 1. Inventory Management
+- Medicine catalog with batch-level tracking
+- **FEFO (First-Expired-First-Out)** logic for automatic expiry prioritization
+- Multi-batch support with different expiry dates per medicine
+- Low stock alerts with configurable reorder levels
+- Category-based organization
+
+### 2. AI-Powered Intelligence
+- **Demand Forecasting** - Predicts seasonal spikes using Groq/Llama 3.3
+- **AI Pharmacy Assistant** - Natural language queries for inventory insights
+- Smart reorder point suggestions
+- Alternative medicine suggestions
+
+### 3. Sales & Billing (POS)
+- Fast checkout with batch-aware sales
+- Automatic FEFO batch selection during sales
+- Invoice generation with print support
+- Email receipts via Nodemailer
+- Sales history and analytics
+
+### 4. Alerts System
+- Expiry notifications (30/60/90 days)
+- Low stock alerts
+- Real-time notifications via Supabase subscriptions
+- Price change monitoring
+
+### 5. Analytics & Reporting
+- Revenue dashboards
+- Inventory turnover rates
+- Waste prevention metrics
+- Category-based breakdowns
+
+## Database Schema (Supabase)
+
+### Core Tables
+- `profiles` - User accounts (extends auth.users) with roles: admin, pharmacist, staff
+- `categories` - Medicine categories
+- `suppliers` - Supplier management
+- `medicines` - Medicine catalog
+- `batches` - Batch-level inventory (critical for FEFO)
+- `sales` - Transaction records
+- `sale_items` - Individual line items
+- `alerts` - System notifications
+- `forecast_results` - AI forecast data
+- `stock_movements` - Audit trail
+
+### Key Database Views
+- `medicines_with_stock` - Medicines with aggregated stock from batches
+- `expiring_batches` - Batches expiring soon with status
+
+### Key Database Functions
+- `get_fefo_batches()` - Returns batches in FEFO order for sales
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── assistant/route.ts    # AI chat endpoint (Groq)
+│   │   ├── forecast-ai/route.ts  # Demand forecasting endpoint
+│   │   ├── send-receipt/route.ts # Email receipts
+│   │   └── jobs/daily-alerts/    # Scheduled alert generation
+│   ├── dashboard/
+│   │   ├── page.tsx              # Main dashboard
+│   │   ├── inventory/page.tsx    # Inventory management
+│   │   ├── sales/page.tsx        # POS system
+│   │   ├── alerts/page.tsx       # Alert management
+│   │   ├── forecasting/page.tsx  # AI forecasting
+│   │   ├── analytics/page.tsx    # Reports
+│   │   ├── assistant/page.tsx    # AI chatbot
+│   │   ├── settings/page.tsx     # User preferences
+│   │   └── management/           # Categories, suppliers, users, expiring
+│   ├── login/page.tsx
+│   └── register/page.tsx
+├── components/
+│   ├── ui/                       # Shadcn/Radix components
+│   ├── layout/dashboard-sidebar.tsx
+│   └── dashboard/inventory/      # Add medicine, data actions
+├── hooks/
+│   ├── use-supabase.ts          # Auth & real-time hooks
+│   └── use-debounce.ts
+├── lib/
+│   ├── supabase/client.ts       # Browser client
+│   ├── supabase/server.ts       # Server client
+│   ├── permissions.tsx          # RBAC system
+│   └── utils.ts
+├── services/
+│   └── dashboard.ts             # Data fetching functions
+├── types/
+│   ├── database.ts              # Supabase type definitions
+│   └── index.ts                 # App-level types
+└── middleware.ts                # Auth route protection
+```
+
+## User Roles & Permissions
+
+| Role | Permissions |
+|------|-------------|
+| **Admin** | Full access - users, inventory, delete, settings |
+| **Pharmacist** | Inventory CRUD, sales, alerts, analytics |
+| **Staff** | View inventory, make sales, view alerts |
+
+## API Routes
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/assistant` | AI chatbot (pharmacy queries) |
+| `POST /api/forecast-ai` | AI demand forecasting |
+| `POST /api/send-receipt` | Email invoice to customer |
+| `POST /api/jobs/daily-alerts` | Generate daily alerts (cron) |
+
+## Environment Variables
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=      # Supabase project URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY= # Supabase anon key
+SUPABASE_SERVICE_ROLE_KEY=     # Supabase service role (server)
+GROQ_API_KEY=                  # Groq API for AI features
+EMAIL_HOST=                    # SMTP host for receipts
+EMAIL_USER=                    # SMTP username
+EMAIL_PASS=                    # SMTP password
+```
+
+## Key Patterns Used
+
+1. **Client Components** - Dashboard pages use `"use client"` for interactivity
+2. **Force Dynamic** - `export const dynamic = "force-dynamic"` for real-time data
+3. **Supabase RLS** - Row-level security policies for all tables
+4. **Real-time Subscriptions** - Live updates via Supabase channels
+5. **Glassmorphism UI** - `.glass-card` with backdrop blur effects
+6. **Gradient Branding** - Primary to pharma-emerald gradients
+
+## Commands
+
+```bash
+npm run dev    # Start development server
+npm run build  # Production build
+npm run start  # Start production server
+npm run lint   # Run ESLint
+```
+
+---
+
+# Scratchpad
+
+## Current Task
+[X] Scan and understand entire codebase
+[X] Identify missing features for sellable product
+[X] Implement Barcode Scanner feature (USB + Camera)
+[ ] Implement remaining critical features for production-ready SaaS
+
+## Lessons
+
+- Uses Tailwind CSS v4 with `@tailwindcss/postcss` plugin
+- Next.js 16 with React 19
+- Supabase SSR client pattern (`@supabase/ssr`)
+- Groq SDK with `llama-3.3-70b-versatile` model
+- Uses `sonner` for toast notifications
+- Shadcn/ui components in `src/components/ui/`
+- Custom animations in `src/components/ui/animated.tsx`
+- Indian Rupee (₹) currency formatting throughout
+- Barcode scanner uses `html5-qrcode` library for camera scanning
+- USB/Bluetooth barcode scanners work by detecting rapid keystrokes ending with Enter
+
+## Notes
+
+- The project is production-ready with Vercel deployment config
+- Has Excel import/export for inventory data
+- Comprehensive RBAC with permission checks
+- Dashboard has shader intro animation on first load
+

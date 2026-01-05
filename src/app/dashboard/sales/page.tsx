@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { GradientText, RevealOnScroll, TiltCard } from "@/components/ui/animated";
+import { BarcodeScanner } from "@/components/ui/barcode-scanner";
 import {
     ShoppingCart,
     Search,
@@ -49,6 +50,7 @@ import {
     Printer,
     X,
     AlertCircle,
+    ScanBarcode,
 } from "lucide-react";
 import { useSupabase } from "@/hooks/use-supabase";
 import { toWords } from 'number-to-words'; // Keep for printing receipts
@@ -60,6 +62,7 @@ interface Medicine {
     id: string;
     name: string;
     generic_name?: string;
+    barcode?: string;
     batches: Batch[];
 }
 
@@ -142,6 +145,9 @@ export default function SalesPage() {
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [historySearchQuery, setHistorySearchQuery] = useState("");
     const [historySearchDate, setHistorySearchDate] = useState("");
+    
+    // Barcode Scanner State
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     // Print receipt function
     const handlePrint = () => {
@@ -233,6 +239,7 @@ export default function SalesPage() {
                     id,
                     name,
                     generic_name,
+                    barcode,
                     batches (
                         id,
                         batch_number,
@@ -408,17 +415,58 @@ export default function SalesPage() {
         }
     }, [isEditDialogOpen]);
 
-    // Filter medicines based on search (by name, generic name, or batch number)
+    // Filter medicines based on search (by name, generic name, batch number, or barcode)
     const filteredMedicines = medicines.filter(
         (med) => {
             const query = debouncedSearchQuery.toLowerCase();
             return (
                 med.name.toLowerCase().includes(query) ||
                 (med.generic_name && med.generic_name.toLowerCase().includes(query)) ||
+                (med.barcode && med.barcode.toLowerCase().includes(query)) ||
                 med.batches.some(b => b.batch_number.toLowerCase().includes(query))
             );
         }
     );
+
+    // Barcode scan handler - finds medicine by barcode and adds to cart
+    const handleBarcodeScan = useCallback((barcode: string) => {
+        const cleanBarcode = barcode.trim();
+        
+        // Search for medicine by barcode
+        const foundMedicine = medicines.find(
+            (med) => med.barcode && med.barcode.toLowerCase() === cleanBarcode.toLowerCase()
+        );
+
+        if (foundMedicine) {
+            if (foundMedicine.batches.length === 0) {
+                toast.error(`${foundMedicine.name} is out of stock`);
+                return;
+            }
+            addToCart(foundMedicine);
+            setIsScannerOpen(false);
+            toast.success(`Added ${foundMedicine.name} to cart`, {
+                icon: "🛒",
+            });
+        } else {
+            // Try searching by batch number as fallback
+            const foundByBatch = medicines.find(
+                (med) => med.batches.some(b => b.batch_number.toLowerCase() === cleanBarcode.toLowerCase())
+            );
+
+            if (foundByBatch) {
+                addToCart(foundByBatch);
+                setIsScannerOpen(false);
+                toast.success(`Added ${foundByBatch.name} to cart`, {
+                    icon: "🛒",
+                });
+            } else {
+                toast.error(`No product found for barcode: ${cleanBarcode}`, {
+                    description: "Make sure the barcode is registered in inventory",
+                    duration: 4000,
+                });
+            }
+        }
+    }, [medicines]);
 
     // Find alternative drugs when searched medicine is out of stock
     const findAlternatives = (medicineName: string): Medicine[] => {
@@ -902,14 +950,26 @@ export default function SalesPage() {
                             <CardHeader className="pb-3">
                                 <div className="flex items-center justify-between">
                                     <CardTitle className="text-lg">Select Products</CardTitle>
-                                    <div className="relative w-64">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                        <Input
-                                            placeholder="Search medicine or batch..."
-                                            className="pl-10 bg-background/50"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                        />
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative w-64">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                            <Input
+                                                placeholder="Search medicine, batch, barcode..."
+                                                className="pl-10 bg-background/50"
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                            />
+                                        </div>
+                                        {/* Barcode Scanner Button */}
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="relative shrink-0 hover:border-primary hover:bg-primary/10"
+                                            onClick={() => setIsScannerOpen(true)}
+                                            title="Scan Barcode (USB/Camera)"
+                                        >
+                                            <ScanBarcode className="w-4 h-4" />
+                                        </Button>
                                     </div>
                                 </div>
                             </CardHeader>
@@ -1789,6 +1849,15 @@ export default function SalesPage() {
                     </motion.div>
                 </DialogContent>
             </Dialog>
+
+            {/* Barcode Scanner Dialog */}
+            <BarcodeScanner
+                mode="dialog"
+                isOpen={isScannerOpen}
+                onOpenChange={setIsScannerOpen}
+                onScan={handleBarcodeScan}
+                placeholder="Scan product barcode..."
+            />
 
             {/* Print Receipt (Hidden from screen, shown only when printing) */}
             {

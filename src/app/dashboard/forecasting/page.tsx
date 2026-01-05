@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { PermissionDenied, hasPermission, UserRole } from "@/lib/permissions";
 
 // Types
 interface ForecastItem {
@@ -225,6 +226,23 @@ export default function ForecastingPage() {
     const [isGeneratingPO, setIsGeneratingPO] = useState(false);
 
     const supabase = createClient();
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
+
+    // Fetch user role
+    useEffect(() => {
+        async function fetchUserRole() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase
+                    .from("profiles")
+                    .select("role")
+                    .eq("id", user.id)
+                    .single();
+                if (data) setUserRole(data.role as UserRole);
+            }
+        }
+        fetchUserRole();
+    }, []);
 
     // Calculate forecasts from real data
     const calculateForecasts = useCallback(async () => {
@@ -623,6 +641,17 @@ export default function ForecastingPage() {
     const avgConfidence = forecastData.length > 0
         ? Math.round(forecastData.reduce((sum, f) => sum + f.confidence, 0) / forecastData.length)
         : 0;
+
+    // Permission check - only admin and pharmacist can view forecasting
+    if (!hasPermission(userRole, "VIEW_FORECASTING")) {
+        return (
+            <PermissionDenied
+                userRole={userRole}
+                requiredRoles={["admin", "pharmacist"]}
+                feature="view demand forecasting"
+            />
+        );
+    }
 
     return (
         <div className="p-6 lg:p-8 space-y-6">

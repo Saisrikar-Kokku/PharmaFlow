@@ -38,15 +38,37 @@ import {
 } from "lucide-react";
 import { fetchAnalyticsData } from "@/lib/analytics/fetch-analytics";
 import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
+import { PermissionDenied, hasPermission, UserRole } from "@/lib/permissions";
 
 export default function AnalyticsPage() {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [selectedPeriod, setSelectedPeriod] = useState("30");
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
+    const supabase = createClient();
 
     useEffect(() => {
-        loadAnalytics();
-    }, [selectedPeriod]);
+        fetchUserRole();
+    }, []);
+
+    async function fetchUserRole() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data: profile } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("id", user.id)
+                .single();
+            if (profile) setUserRole(profile.role as UserRole);
+        }
+    }
+
+    useEffect(() => {
+        if (userRole && hasPermission(userRole, "VIEW_ANALYTICS")) {
+            loadAnalytics();
+        }
+    }, [selectedPeriod, userRole]);
 
     async function loadAnalytics() {
         try {
@@ -111,6 +133,17 @@ export default function AnalyticsPage() {
                     <p className="text-muted-foreground mt-4">Loading analytics...</p>
                 </div>
             </div>
+        );
+    }
+
+    // Permission check - only admin and pharmacist can view analytics
+    if (!hasPermission(userRole, "VIEW_ANALYTICS")) {
+        return (
+            <PermissionDenied
+                userRole={userRole}
+                requiredRoles={["admin", "pharmacist"]}
+                feature="view analytics"
+            />
         );
     }
 
