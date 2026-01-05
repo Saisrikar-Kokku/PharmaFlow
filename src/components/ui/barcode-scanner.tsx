@@ -87,6 +87,9 @@ export function BarcodeScanner({
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [isProcessingImage, setIsProcessingImage] = useState(false);
     const [imageError, setImageError] = useState<string | null>(null);
+    const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+    const [permissionDenied, setPermissionDenied] = useState(false);
+    const [cameraRetryKey, setCameraRetryKey] = useState(0);
 
     // Scanner refs
     const lastKeyTime = useRef<number>(0);
@@ -578,10 +581,53 @@ export function BarcodeScanner({
         const startCamera = async () => {
             setIsScanning(false);
             setCameraError(null);
+            setPermissionDenied(false);
+            setIsRequestingPermission(true);
             isScannerRunning.current = false;
 
             try {
-                // Dynamic import to avoid SSR issues
+                // Step 1: Explicitly request camera permission first
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error("Camera access is not supported in this browser");
+                }
+
+                // Request permission with timeout
+                const permissionPromise = navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: "environment",
+                    },
+                });
+
+                const timeoutPromise = new Promise<never>((_, reject) => {
+                    setTimeout(() => reject(new Error("Camera permission request timed out. Please allow camera access when prompted.")), 10000);
+                });
+
+                let permissionStream: MediaStream | null = null;
+                try {
+                    permissionStream = await Promise.race([permissionPromise, timeoutPromise]);
+                    // Permission granted - stop the test stream immediately
+                    permissionStream.getTracks().forEach(track => track.stop());
+                    permissionStream = null;
+                } catch (permError: unknown) {
+                    const error = permError as Error;
+                    if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+                        setPermissionDenied(true);
+                        throw new Error("Camera permission denied. Please allow camera access in your browser settings and try again.");
+                    } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+                        throw new Error("No camera found. Please connect a camera and try again.");
+                    } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+                        throw new Error("Camera is already in use by another application. Please close other apps using the camera.");
+                    } else {
+                        throw error;
+                    }
+                }
+
+                // Check if still mounted after permission request
+                if (!isMounted) return;
+
+                setIsRequestingPermission(false);
+
+                // Step 2: Dynamic import to avoid SSR issues
                 const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
 
                 // Check if we're still mounted after async import
@@ -616,8 +662,9 @@ export function BarcodeScanner({
                     return;
                 }
 
-                // Start camera with optimized settings for barcode scanning
-                await localScanner.start(
+                // Step 3: Start camera with optimized settings for barcode scanning
+                // Add timeout for camera start
+                const startPromise = localScanner.start(
                     { facingMode: "environment" },
                     {
                         fps: 30, // Higher FPS for faster detection
@@ -634,6 +681,12 @@ export function BarcodeScanner({
                         // Barcode scanning failure (ignore, continuous scanning)
                     }
                 );
+
+                const startTimeoutPromise = new Promise<never>((_, reject) => {
+                    setTimeout(() => reject(new Error("Camera initialization timed out. Please try again.")), 15000);
+                });
+
+                await Promise.race([startPromise, startTimeoutPromise]);
 
                 // Apply camera optimizations after start
                 try {
@@ -686,9 +739,23 @@ export function BarcodeScanner({
                 console.error("Camera error:", err);
                 isScannerRunning.current = false;
                 if (isMounted) {
-                    const errorMessage = err instanceof Error ? err.message : "Failed to access camera";
+                    const error = err as Error;
+                    let errorMessage = "Failed to access camera";
+                    
+                    if (error.message) {
+                        errorMessage = error.message;
+                    } else if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+                        errorMessage = "Camera permission denied. Please allow camera access in your browser settings.";
+                        setPermissionDenied(true);
+                    } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+                        errorMessage = "No camera found. Please connect a camera and try again.";
+                    } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+                        errorMessage = "Camera is already in use. Please close other apps using the camera.";
+                    }
+                    
                     setCameraError(errorMessage);
                     setIsScanning(false);
+                    setIsRequestingPermission(false);
                 }
             }
         };
@@ -705,7 +772,7 @@ export function BarcodeScanner({
             }
             scannerRef.current = null;
         };
-    }, [isOpen, scanMode, safeStopScanner, handleSuccessfulScan]);
+    }, [isOpen, scanMode, cameraRetryKey, safeStopScanner, handleSuccessfulScan]);
 
     const stopCamera = useCallback(async () => {
         isScannerRunning.current = false;
@@ -716,10 +783,19 @@ export function BarcodeScanner({
         setIsScanning(false);
     }, [safeStopScanner]);
 
+    const retryCamera = useCallback(() => {
+        setCameraError(null);
+        setPermissionDenied(false);
+        setIsRequestingPermission(false);
+        setCameraRetryKey(prev => prev + 1);
+    }, []);
+
     const handleClose = useCallback(async () => {
         await stopCamera();
         setLastScanned(null);
         setCameraError(null);
+        setPermissionDenied(false);
+        setIsRequestingPermission(false);
         setIsOpen(false);
     }, [stopCamera, setIsOpen]);
 
@@ -762,6 +838,9 @@ export function BarcodeScanner({
                     isProcessingImage={isProcessingImage}
                     imageError={imageError}
                     fileInputRef={fileInputRef}
+                    isRequestingPermission={isRequestingPermission}
+                    permissionDenied={permissionDenied}
+                    onRetryCamera={retryCamera}
                 />
             </>
         );
@@ -786,6 +865,9 @@ export function BarcodeScanner({
                 isProcessingImage={isProcessingImage}
                 imageError={imageError}
                 fileInputRef={fileInputRef}
+                isRequestingPermission={isRequestingPermission}
+                permissionDenied={permissionDenied}
+                onRetryCamera={retryCamera}
             />
         );
     }
@@ -889,6 +971,9 @@ function ScannerDialog({
     isProcessingImage,
     imageError,
     fileInputRef,
+    isRequestingPermission,
+    permissionDenied,
+    onRetryCamera,
 }: {
     isOpen: boolean;
     onClose: () => void;
@@ -905,6 +990,9 @@ function ScannerDialog({
     isProcessingImage?: boolean;
     imageError?: string | null;
     fileInputRef?: React.RefObject<HTMLInputElement | null>;
+    isRequestingPermission?: boolean;
+    permissionDenied?: boolean;
+    onRetryCamera?: () => void;
 }) {
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -954,6 +1042,9 @@ function ScannerDialog({
                             isProcessingImage={isProcessingImage}
                             imageError={imageError}
                             fileInputRef={fileInputRef}
+                            isRequestingPermission={isRequestingPermission}
+                            permissionDenied={permissionDenied}
+                            onRetryCamera={onRetryCamera}
                         />
                     </div>
                 </GradientBorder>
@@ -982,6 +1073,9 @@ function ScannerContent({
     isProcessingImage,
     imageError,
     fileInputRef,
+    isRequestingPermission,
+    permissionDenied,
+    onRetryCamera,
 }: {
     scanMode: "usb" | "camera" | "image";
     setScanMode: (mode: "usb" | "camera" | "image") => void;
@@ -994,6 +1088,9 @@ function ScannerContent({
     isProcessingImage?: boolean;
     imageError?: string | null;
     fileInputRef?: React.RefObject<HTMLInputElement | null>;
+    isRequestingPermission?: boolean;
+    permissionDenied?: boolean;
+    onRetryCamera?: () => void;
 }) {
     return (
         <div className="space-y-4">
@@ -1059,6 +1156,9 @@ function ScannerContent({
                                 videoRef={videoRef}
                                 isScanning={isScanning}
                                 cameraError={cameraError}
+                                isRequestingPermission={isRequestingPermission}
+                                permissionDenied={permissionDenied}
+                                onRetry={onRetryCamera}
                             />
                         )}
                         {scanMode === "image" && (
@@ -1238,10 +1338,16 @@ function CameraScannerView({
     videoRef,
     isScanning,
     cameraError,
+    isRequestingPermission,
+    permissionDenied,
+    onRetry,
 }: {
     videoRef: React.RefObject<HTMLDivElement | null>;
     isScanning: boolean;
     cameraError: string | null;
+    isRequestingPermission?: boolean;
+    permissionDenied?: boolean;
+    onRetry?: () => void;
 }) {
     return (
         <div className="relative">
@@ -1254,10 +1360,39 @@ function CameraScannerView({
                     >
                         <AlertCircle className="w-8 h-8 text-destructive" />
                     </motion.div>
-                    <h3 className="text-foreground font-medium mb-2">Camera Access Denied</h3>
-                    <p className="text-sm text-muted-foreground max-w-xs mx-auto">{cameraError}</p>
+                    <h3 className="text-foreground font-medium mb-2">Camera Access Error</h3>
+                    <p className="text-sm text-muted-foreground max-w-xs mx-auto mb-4">{cameraError}</p>
+                    {permissionDenied && (
+                        <p className="text-xs text-muted-foreground/70 mb-4">
+                            Please allow camera access in your browser settings and click retry
+                        </p>
+                    )}
+                    {onRetry && (
+                        <Button
+                            onClick={onRetry}
+                            className="mt-4 bg-linear-to-r from-primary to-pharma-emerald hover:opacity-90"
+                        >
+                            <Camera className="w-4 h-4 mr-2" />
+                            Retry Camera Access
+                        </Button>
+                    )}
+                </div>
+            ) : isRequestingPermission ? (
+                <div className="text-center py-12 px-4">
+                    <motion.div
+                        className="relative w-16 h-16 mx-auto mb-4"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    >
+                        <div className="absolute inset-0 rounded-full border-2 border-white/10" />
+                        <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary" />
+                    </motion.div>
+                    <h3 className="text-foreground font-medium mb-2">Requesting Camera Permission</h3>
+                    <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                        Please allow camera access when prompted by your browser
+                    </p>
                     <p className="text-xs text-muted-foreground/70 mt-4">
-                        Allow camera access in your browser settings
+                        If no prompt appears, check your browser&apos;s permission settings
                     </p>
                 </div>
             ) : (
